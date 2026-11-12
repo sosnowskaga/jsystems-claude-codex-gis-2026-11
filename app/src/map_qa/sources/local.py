@@ -14,9 +14,10 @@ REQUIRED_COLUMNS: tuple[str, ...] = ("osm_id", "maxspeed", "tags")
 
 
 class LocalRoadsSource:
-    def __init__(self, path: Path, chosen_by: str = "default") -> None:
+    def __init__(self, path: Path, chosen_by: str = "default", location: str | None = None) -> None:
         self.path = path
         self.chosen_by = chosen_by
+        self.location = location or str(path)  # label shown in reports; relative when known
 
     def read_roads(self, way_ids: list[int]) -> RoadsResult:
         if not self.path.is_file():
@@ -50,7 +51,7 @@ class LocalRoadsSource:
         meta = SourceMeta(
             dataset="osm_roads",
             source_kind="local",
-            location=str(self.path),
+            location=self.location,
             chosen_by=self.chosen_by,
             rows=len(rows),
             read_at=datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),

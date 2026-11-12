@@ -61,10 +61,21 @@ def summary_counts(results: list[SignResult]) -> dict:
     }
 
 
+def link_path(path: str | Path, out_dir: Path) -> str:
+    """Path relative to the report folder with ``/`` separators (AC-27).
+
+    On Windows a path on another drive has no relative form; it is then given absolute.
+    """
+    try:
+        return os.path.relpath(path, out_dir).replace("\\", "/")
+    except ValueError:
+        return Path(path).as_posix()
+
+
 def result_row(result: SignResult, out_dir: Path, tiers: dict[str, TierConfig] | None = None) -> dict[str, str]:
     sign, link, tags, reading = result.sign, result.link, result.tags, result.reading
     t1, t2 = reading.tier1, reading.tier2
-    rel = lambda path: os.path.relpath(path, out_dir).replace("\\", "/")
+    rel = lambda path: link_path(path, out_dir)
     return dict(zip(RESULTS_COLUMNS, (
         sign.photo_id, sign.area, sign.sequence, result.comparison.outcome,
         result.comparison.abstain_reason or "", result.comparison.not_comparable_reason or "",
@@ -106,8 +117,8 @@ class _MarkdownCell(str):
 
 def _crop_cell(r: SignResult, ctx: ReportContext) -> str:
     sign = r.sign
-    crop = os.path.relpath(sign.crop_path, ctx.out_dir).replace("\\", "/")
-    photo = os.path.relpath(sign.photo_path, ctx.out_dir).replace("\\", "/")
+    crop = link_path(sign.crop_path, ctx.out_dir)
+    photo = link_path(sign.photo_path, ctx.out_dir)
     return _MarkdownCell(f"[wycinek](<{md_escape(crop)}>) · [zdjęcie](<{md_escape(photo)}>) — {_cell(sign.creator)}, [{_cell(sign.source)}]({md_escape(sign.source_url)}), {_cell(sign.license)}")
 
 

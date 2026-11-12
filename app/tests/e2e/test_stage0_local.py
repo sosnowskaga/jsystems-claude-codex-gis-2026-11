@@ -18,7 +18,6 @@ import pytest
 
 from conftest import DATA_DIR, FIXTURES, run_cli
 
-pytestmark = pytest.mark.xfail(strict=True, reason="pipeline not implemented")
 
 TRUSTED = 61
 ABSTAINED = 58
