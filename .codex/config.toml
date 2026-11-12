@@ -116,7 +116,7 @@ url = "https://mcp.context7.com/mcp"
 env_http_headers = { "CONTEXT7_API_KEY" = "CONTEXT7_API_KEY" } # Optional environment-variable header; never paste a key.
 startup_timeout_sec = 20
 tool_timeout_sec = 60
-enabled = true # Optional integration; key comes from CONTEXT7_API_KEY or the user config.
+enabled = false # Optional integration; the course starts with local CLI tools.
 # Local MCP server with Context7 on your machine
 # [mcp_servers.context7]
 # command = "npx"
