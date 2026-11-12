@@ -82,3 +82,30 @@ def test_live_mode_shows_crops_and_limits_and_sends_nothing_until_confirmed(tmp_
     assert "test-key-value" not in result.stdout + result.stderr
     assert not (tmp_path / "report.md").exists()
     assert not (tmp_path / "c" / "ledger.json").exists()
+
+
+def test_kept_candidate_row_is_refreshed_when_the_outcome_changes(tmp_path: Path, no_network):
+    """Review finding (ADR-004 §5): machine columns of kept rows follow the current run."""
+    import csv
+
+    out = tmp_path / "run"
+    review = out / "review.csv"
+
+    def set_human(value: str) -> None:
+        rows = list(csv.DictReader(review.open(encoding="utf-8", newline="")))
+        for row in rows:
+            if row["row_id"] == "mapillary_1035052394661534:queue":
+                row["human_value"] = value
+        with review.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+
+    execute(_settings({}), RunOptions(out=out, env={}))
+    set_human("70")  # maxspeed=60 -> mismatch, candidate row added
+    execute(_settings({}), RunOptions(out=out, env={}))
+    set_human("60")  # now a match: the kept candidate row must not say mismatch any more
+    execute(_settings({}), RunOptions(out=out, env={}))
+    rows = {r["row_id"]: r for r in csv.DictReader(review.open(encoding="utf-8", newline=""))}
+    assert rows["mapillary_1035052394661534:candidate"]["outcome"] == "match"
+    assert rows["mapillary_1035052394661534:queue"]["outcome"] == "match"

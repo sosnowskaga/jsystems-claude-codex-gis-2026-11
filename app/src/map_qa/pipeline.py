@@ -27,7 +27,7 @@ from map_qa.models import (
     SignResult,
     TierConfig,
 )
-from map_qa.review import human_values, machine_rows, merge, read_review, verdicts, write_review
+from map_qa.review import human_values, machine_rows, machine_values, merge, read_review, verdicts, write_review
 from map_qa.sources.databricks import DatabricksRoadsSource
 from map_qa.sources.local import LocalRoadsSource
 
@@ -278,7 +278,7 @@ def execute(
         "report": out / "report.md",
     }
     write_results_csv(paths["results"], ctx)
-    write_review(paths["review"], merge(existing_review, machine_rows(results)))
+    write_review(paths["review"], merge(existing_review, machine_rows(results), refresh=machine_values(results)))
     write_run_json(out, ctx)
     # `run` calls evaluate after the results exist (ADR-000 §4); only cli imports evaluate.
     if evaluator is not None:

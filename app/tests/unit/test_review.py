@@ -21,7 +21,15 @@ from map_qa.models import (
     SignResult,
     StageAnswer,
 )
-from map_qa.review import human_values, machine_rows, merge, read_review, verdicts, write_review
+from map_qa.review import (
+    human_values,
+    machine_rows,
+    machine_values,
+    merge,
+    read_review,
+    verdicts,
+    write_review,
+)
 
 
 # --- helpers ------------------------------------------------------------------------------------
@@ -403,3 +411,103 @@ def test_machine_rows_mismatch_adds_candidate_row_too() -> None:
 
     assert [row.row_id for row in rows2] == ["p2:candidate"]
     assert rows2[0].tier2_answer == "30"
+
+
+# --- machine values and refresh of kept rows (ADR-004 §5, AC-29) --------------------------------
+
+
+def test_machine_values_per_photo_id_same_as_machine_rows() -> None:
+    results = [
+        _result("p1", TIER_HUMAN, "mismatch", tier1_answer="50", tier2_answer="30"),
+        _result("p2", TIER_DECISION_MODEL, "match", tier1_answer="50", osm_way_id=None),
+    ]
+
+    values = machine_values(results)
+
+    assert values == {
+        "p1": {"osm_way_id": "123", "tier1_answer": "50", "tier2_answer": "30", "outcome": "mismatch"},
+        "p2": {"osm_way_id": "", "tier1_answer": "50", "tier2_answer": "", "outcome": "match"},
+    }
+    for row in machine_rows(results):
+        assert {column: getattr(row, column) for column in values[row.photo_id]} == values[row.photo_id]
+
+
+def test_merge_refresh_accepted_queue_row_keeps_human_columns_and_row() -> None:
+    existing = [
+        _row(
+            row_id="p1:queue",
+            photo_id="p1",
+            osm_way_id="77",
+            human_value=" 50 ",
+            outcome="pending_human",
+            comment="kept comment",
+        ),
+    ]
+    # sign now accepted by a model: no queue row in the current run
+    results = [_result("p1", TIER_DECISION_MODEL, "match", tier1_answer="50")]
+    current = machine_rows(results)
+    assert current == []
+
+    merged = merge(existing, current, refresh=machine_values(results))
+
+    assert len(merged) == 1
+    row = merged[0]
+    assert row.row_id == "p1:queue"
+    assert row.outcome == "match"
+    assert row.tier1_answer == "50"
+    assert row.tier2_answer == ""
+    assert row.osm_way_id == "123"
+    assert row.human_value == " 50 "
+    assert row.comment == "kept comment"
+    assert row.verdict == ""
+
+
+def test_merge_refresh_candidate_now_match_keeps_verdict_and_comment() -> None:
+    existing = [
+        _row(
+            row_id="p1:candidate",
+            row_type="candidate",
+            photo_id="p1",
+            osm_way_id="123",
+            tier1_answer="30",
+            outcome="mismatch",
+            verdict="confirmed",
+            comment="znak dotyczy innej jezdni",
+        ),
+    ]
+    results = [_result("p1", TIER_DECISION_MODEL, "match", tier1_answer="50")]
+
+    merged = merge(existing, machine_rows(results), refresh=machine_values(results))
+
+    assert len(merged) == 1
+    row = merged[0]
+    assert row.row_id == "p1:candidate"
+    assert row.outcome == "match"
+    assert row.tier1_answer == "50"
+    assert row.verdict == "confirmed"
+    assert row.comment == "znak dotyczy innej jezdni"
+
+
+def test_merge_refresh_leaves_rows_of_signs_not_in_run_unchanged() -> None:
+    existing = [
+        _row(row_id="p1:queue", photo_id="p1", outcome="pending_human", human_value="none"),
+        _row(row_id="p2:queue", photo_id="p2", outcome="pending_human", comment="x"),
+    ]
+    results = [_result("p2", TIER_DECISION_MODEL, "match", tier1_answer="50")]
+
+    merged = merge(existing, machine_rows(results), refresh=machine_values(results))
+    by_id = {row.row_id: row for row in merged}
+
+    assert set(by_id) == {"p1:queue", "p2:queue"}
+    assert by_id["p1:queue"] == existing[0]
+    assert by_id["p2:queue"].outcome == "match"
+    assert by_id["p2:queue"].comment == "x"
+
+
+def test_merge_without_refresh_is_unchanged_behaviour() -> None:
+    existing = [_row(row_id="p1:queue", photo_id="p1", outcome="pending_human", human_value="50")]
+    results = [_result("p1", TIER_DECISION_MODEL, "match", tier1_answer="50")]
+
+    merged = merge(existing, machine_rows(results))
+
+    assert merged == existing

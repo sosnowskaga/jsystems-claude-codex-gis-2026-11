@@ -94,23 +94,34 @@ def verdicts(rows: list[ReviewRow]) -> dict[str, str]:
     return result
 
 
-def machine_rows(results: list[SignResult]) -> list[ReviewRow]:
-    """Queue row for every sign without a model-accepted value, candidate row for every
-    ``mismatch``/``map_missing`` (ADR-004 §5). Human columns are always empty; they are
-    restored by :func:`merge`.
+def machine_values(results: list[SignResult]) -> dict[str, dict[str, str]]:
+    """``{photo_id: {column: value}}`` with the four machine columns of every sign in the run.
+
+    Single source for :func:`machine_rows` and for refreshing kept rows in :func:`merge`.
     """
-    rows: list[ReviewRow] = []
+    values: dict[str, dict[str, str]] = {}
     for result in results:
-        photo_id = result.sign.photo_id
         reading = result.reading
-        machine = {
-            "photo_id": photo_id,
+        values[result.sign.photo_id] = {
             "osm_way_id": "" if result.link.osm_way_id is None else str(result.link.osm_way_id),
             "tier1_answer": reading.tier1.answer if reading.tier1 and reading.tier1.answer else "",
             "tier2_answer": reading.tier2.answer if reading.tier2 and reading.tier2.answer else "",
             "outcome": result.comparison.outcome,
         }
-        if reading.tier not in (TIER_DECISION_MODEL, TIER_LLM):
+    return values
+
+
+def machine_rows(results: list[SignResult]) -> list[ReviewRow]:
+    """Queue row for every sign without a model-accepted value, candidate row for every
+    ``mismatch``/``map_missing`` (ADR-004 §5). Human columns are always empty; they are
+    restored by :func:`merge`.
+    """
+    values = machine_values(results)
+    rows: list[ReviewRow] = []
+    for result in results:
+        photo_id = result.sign.photo_id
+        machine = {"photo_id": photo_id, **values[photo_id]}
+        if result.reading.tier not in (TIER_DECISION_MODEL, TIER_LLM):
             rows.append(ReviewRow(row_id=ReviewRow.make_id(photo_id, QUEUE), row_type=QUEUE, **machine))
         if result.comparison.outcome in CANDIDATE_OUTCOMES:
             rows.append(
@@ -119,11 +130,18 @@ def machine_rows(results: list[SignResult]) -> list[ReviewRow]:
     return rows
 
 
-def merge(existing: list[ReviewRow], current: list[ReviewRow]) -> list[ReviewRow]:
+def merge(
+    existing: list[ReviewRow],
+    current: list[ReviewRow],
+    refresh: dict[str, dict[str, str]] | None = None,
+) -> list[ReviewRow]:
     """Merge the rows of the previous review with the rows of the current run (AC-29).
 
     Rows are never deleted. Existing rows keep their human columns byte for byte and get
     their machine columns refreshed from ``current``; rows only in ``current`` are added.
+    When ``refresh`` (see :func:`machine_values`) is given, every existing row whose
+    ``photo_id`` is in it gets its machine columns from it, even if the row is not in
+    ``current`` (a sign now accepted by a model, or a sign whose outcome changed).
     Output is sorted by ``photo_id``, queue before candidate.
     """
     merged: dict[str, ReviewRow] = {row.row_id: row for row in existing}
@@ -132,8 +150,13 @@ def merge(existing: list[ReviewRow], current: list[ReviewRow]) -> list[ReviewRow
         if previous is None:
             merged[row.row_id] = row
         else:
-            refresh = {column: getattr(row, column) for column in MACHINE_COLUMNS}
-            merged[row.row_id] = replace(previous, **refresh)
+            machine = {column: getattr(row, column) for column in MACHINE_COLUMNS}
+            merged[row.row_id] = replace(previous, **machine)
+    if refresh is not None:
+        for row_id, row in list(merged.items()):
+            values = refresh.get(row.photo_id)
+            if values is not None:
+                merged[row_id] = replace(row, **values)
     return sorted(merged.values(), key=lambda row: (row.photo_id, row.row_type != QUEUE))
 
 
