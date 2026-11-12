@@ -100,7 +100,10 @@ def write_results_csv(path: Path, ctx: ReportContext) -> None:
 
 
 def md_escape(text: str) -> str:
-    return str(text).replace("\r", " ").replace("\n", " ").replace("|", r"\|").replace("<", "&lt;").replace("`", r"\`")
+    text = str(text).replace("\r", " ").replace("\n", " ").replace("\\", "\\\\")  # backslash first
+    for char in ("|", "`", "[", "]"):
+        text = text.replace(char, "\\" + char)
+    return text.replace("<", "&lt;")
 
 
 def _cell(value: object) -> str:

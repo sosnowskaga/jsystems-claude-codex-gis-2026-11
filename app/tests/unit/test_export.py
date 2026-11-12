@@ -122,3 +122,9 @@ def test_written_files_use_lf(tmp_path: Path) -> None:
     ctx = make_context(tmp_path)
     write_run_json(ctx.out_dir, ctx)
     assert b"\r\n" not in (ctx.out_dir / "run.json").read_bytes()
+
+
+def test_md_escape_keeps_links_and_backslashes_intact() -> None:
+    assert md_escape("a\\") == r"a\\"
+    assert md_escape("x]y[z") == r"x\]y\[z"
+    assert md_escape(r"a\|b") == r"a\\\|b"  # backslash first, then the pipe: the column is not split
