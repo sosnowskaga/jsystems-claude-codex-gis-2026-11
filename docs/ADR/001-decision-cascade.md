@@ -51,7 +51,7 @@ The identifiers are in the configuration. Changing a model changes the cache key
 ### Tier 1: Decisions, `choice` question
 
 - `questions`: one question `b33_value` of type `choice`, with neutral `instructions` in English and `criteria` containing every label and a short description.
-- `state`: an array with exactly two elements: the fixed text "Street-level photo crop." and the crop image as a data URL with the file bytes and the MIME type based on the extension.
+- `state`: an array with exactly two elements: the fixed text "Street-level photo crop." and the image as a data URL (amended in §4a: the normalized PNG, not the original file bytes).
 - **Nothing else goes into `state`:** no file name, `photo_id`, map value, `mapillary_value`, label, area or date (AC-13). A contract test compares the built request body against the list of allowed fields.
 
 ### Tier 2: Chat Completions
@@ -70,6 +70,16 @@ The identifiers are in the configuration. Changing a model changes the cache key
 Missing `probabilities` is not replaced by the `confidence` field. The 0.80 threshold is the starting value from the PRD. Threshold exploration (AC-36) is done in `cache` mode on the stored distributions and marked as exploratory.
 
 ---
+
+### 4a. Findings from the captures (amendment, 2026-11-12)
+
+Recorded from the real requests in `app/tests/fixtures/captures/openrouter_*.json` (T15). They change the contract above; the PRD behaviour is unchanged.
+
+- **Image size.** Jev 1.14 rejected the original 135×141 px JPEG crop and a 274×287 px resize with `400 Invalid image dimensions` (`openrouter_decisions_jev_http400.json`), although the published minimum is 256 px per side. 512×512 px was accepted. The crops range from 49 px to 2048 px. Decision: every crop is scaled once, aspect ratio kept, so that each side is 512–1568 px, and re-encoded as PNG (`map_qa/image.py`, Pillow 12.0.0). The **same bytes** go to tier 1, tier 2 and the Luna Decisions comparison (AC-12, AC-45). The cache key uses the SHA-256 of these bytes, so a change of the transform invalidates the cache.
+- **Question type and image form.** Both decision models accepted the same `choice` question with 24 labels and the same `state` = [text, image]. GPT-6 Luna Decisions accepted the original small JPEG; Jev did not.
+- **Cost under BYOK.** All three responses report `usage.is_byok = true` and `usage.cost = 0`; the provider cost is in `usage.cost_details.upstream_inference_cost` (Jev 7.8e-05, Luna Decisions 9.3e-05, GPT-6 Luna 8.0e-05 USD per request). The ledger and the evaluation use `usage.cost + upstream_inference_cost` when `is_byok` is true, otherwise `usage.cost`.
+- **Tier-1 answer.** `answers.b33_value` has `choice`, `probabilities` (all 24 labels) and `confidence`. On the captured crop Jev gave p = 0.99 for `30`; Luna Decisions gave p = 0.36 for `30` on the 512 px PNG (and 1.0 on the original small JPEG).
+- **Tier-2 answer.** `choices[0].message.content` is the JSON string `{"value":"30"}`. The message also carries encrypted `reasoning_details`; they stay in the cache only and never reach results or reports.
 
 ## 5. Client, limits, cache, capture
 

@@ -76,7 +76,8 @@ Inputs in `course-materials/exercise-data/map-qa/` are read-only. The tool write
 | Models | `typesafe/jev-1.14` (tier 1), `openai/gpt-6-luna` (tier 2), `openai/gpt-6-luna-decisions` (tier-1 comparison, stage 2b), all through the OpenRouter API | ADR-001 |
 | Report | Markdown from the standard library | No new dependency; HTML in phase 2 |
 | Tests | pytest 9.2.0 | Project standard |
-| Hash | `hashlib` | Image sent byte for byte; Pillow not needed |
+| Hash | `hashlib` | SHA-256 of the input crop and of the image sent |
+| Image | Pillow 12.0.0 | Amended 2026-11-12 after the Jev capture: each crop is scaled to the size Jev accepts and re-encoded as PNG (ADR-001 §4a) |
 
 We do not use the OpenAI client, LangChain or the `openrouter` SDK (ADR-001 §6).
 

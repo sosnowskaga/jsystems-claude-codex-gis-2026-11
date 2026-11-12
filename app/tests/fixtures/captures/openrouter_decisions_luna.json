@@ -1,0 +1,125 @@
+{
+  "captured_at": "2026-11-12T15:34:04+00:00",
+  "target": "OpenRouter /api/alpha/decisions",
+  "model": "openai/gpt-6-luna-decisions",
+  "app_question_version": "b33-v1",
+  "httpx": "0.28.1",
+  "latency_ms": 813,
+  "request": {
+    "method": "POST",
+    "path": "/api/alpha/decisions",
+    "body": {
+      "model": "openai/gpt-6-luna-decisions",
+      "state": [
+        "Street-level photo crop.",
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "<image sha256=49ac2d5de3a2ddc0bdb15c203e158904534e588251d9cfd3e99abbbbc30bea8f>"
+          }
+        }
+      ],
+      "questions": {
+        "b33_value": {
+          "type": "choice",
+          "instructions": "Look at the round prohibitory speed-limit sign (Polish sign B-33: a white disc with a red border and a black number) in this street-level photo crop. Which speed limit value in km/h does it show? Answer 'none' if the crop does not show such a sign, for example a speed-limit zone sign, the end of a zone or of a speed limit, another sign, or no sign at all. Answer 'unreadable' if such a sign is present but its number cannot be read.",
+          "criteria": {
+            "5": "A B-33 speed-limit sign showing 5 km/h.",
+            "10": "A B-33 speed-limit sign showing 10 km/h.",
+            "15": "A B-33 speed-limit sign showing 15 km/h.",
+            "20": "A B-33 speed-limit sign showing 20 km/h.",
+            "25": "A B-33 speed-limit sign showing 25 km/h.",
+            "30": "A B-33 speed-limit sign showing 30 km/h.",
+            "35": "A B-33 speed-limit sign showing 35 km/h.",
+            "40": "A B-33 speed-limit sign showing 40 km/h.",
+            "45": "A B-33 speed-limit sign showing 45 km/h.",
+            "50": "A B-33 speed-limit sign showing 50 km/h.",
+            "55": "A B-33 speed-limit sign showing 55 km/h.",
+            "60": "A B-33 speed-limit sign showing 60 km/h.",
+            "65": "A B-33 speed-limit sign showing 65 km/h.",
+            "70": "A B-33 speed-limit sign showing 70 km/h.",
+            "75": "A B-33 speed-limit sign showing 75 km/h.",
+            "80": "A B-33 speed-limit sign showing 80 km/h.",
+            "90": "A B-33 speed-limit sign showing 90 km/h.",
+            "100": "A B-33 speed-limit sign showing 100 km/h.",
+            "110": "A B-33 speed-limit sign showing 110 km/h.",
+            "120": "A B-33 speed-limit sign showing 120 km/h.",
+            "130": "A B-33 speed-limit sign showing 130 km/h.",
+            "140": "A B-33 speed-limit sign showing 140 km/h.",
+            "none": "No B-33 speed-limit sign: a zone sign, end of zone, end of limit, another sign, or no sign.",
+            "unreadable": "A B-33 speed-limit sign is present but its value cannot be read."
+          }
+        }
+      }
+    }
+  },
+  "status": 200,
+  "headers": {
+    "date": "Thu, 12 Nov 2026 15:34:05 GMT",
+    "content-type": "application/json"
+  },
+  "removed_header_names": [
+    "access-control-allow-origin",
+    "access-control-expose-headers",
+    "alt-svc",
+    "cf-ray",
+    "connection",
+    "content-encoding",
+    "permissions-policy",
+    "referrer-policy",
+    "server",
+    "transfer-encoding",
+    "x-content-type-options",
+    "x-generation-id",
+    "x-provider-name"
+  ],
+  "body": {
+    "model": "openai/gpt-6-luna-decisions-20261006",
+    "answers": {
+      "b33_value": {
+        "type": "choice",
+        "choice": "30",
+        "probabilities": {
+          "5": 0.05,
+          "10": 0.06,
+          "15": 0.09,
+          "20": 0.04,
+          "25": 0.04,
+          "30": 0.36,
+          "35": 0.09,
+          "40": 0.05,
+          "45": 0.03,
+          "50": 0.04,
+          "55": 0.02,
+          "60": 0.01,
+          "65": 0.01,
+          "70": 0.02,
+          "75": 0.01,
+          "80": 0.04,
+          "90": 0.01,
+          "100": 0.01,
+          "110": 0,
+          "120": 0.01,
+          "130": 0,
+          "140": 0,
+          "none": 0,
+          "unreadable": 0.01
+        },
+        "confidence": 0.33
+      }
+    },
+    "usage": {
+      "input_tokens": 927,
+      "output_tokens": 0,
+      "cost": 0,
+      "is_byok": true,
+      "cost_details": {
+        "upstream_inference_cost": 9.27e-05,
+        "upstream_inference_prompt_cost": 9.27e-05,
+        "upstream_inference_completions_cost": 0
+      }
+    },
+    "id": "gen-dec-1794497644-LffPHfqBlgt9w6NgJf1y",
+    "provider": "Azure"
+  }
+}

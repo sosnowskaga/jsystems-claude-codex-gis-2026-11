@@ -1,0 +1,82 @@
+{
+  "captured_at": "2026-11-12T15:33:18+00:00",
+  "target": "OpenRouter /api/alpha/decisions",
+  "model": "typesafe/jev-1.14",
+  "app_question_version": "b33-v1",
+  "httpx": "0.28.1",
+  "latency_ms": 344,
+  "request": {
+    "method": "POST",
+    "path": "/api/alpha/decisions",
+    "body": {
+      "model": "typesafe/jev-1.14",
+      "state": [
+        "Street-level photo crop.",
+        {
+          "type": "image_url",
+          "image_url": {
+            "url": "<image sha256=05e32ab4b1839f9c2ac0ab8068892290699b22db5398f4a942419d4371e7f85d>"
+          }
+        }
+      ],
+      "questions": {
+        "b33_value": {
+          "type": "choice",
+          "instructions": "Look at the round prohibitory speed-limit sign (Polish sign B-33: a white disc with a red border and a black number) in this street-level photo crop. Which speed limit value in km/h does it show? Answer 'none' if the crop does not show such a sign, for example a speed-limit zone sign, the end of a zone or of a speed limit, another sign, or no sign at all. Answer 'unreadable' if such a sign is present but its number cannot be read.",
+          "criteria": {
+            "5": "A B-33 speed-limit sign showing 5 km/h.",
+            "10": "A B-33 speed-limit sign showing 10 km/h.",
+            "15": "A B-33 speed-limit sign showing 15 km/h.",
+            "20": "A B-33 speed-limit sign showing 20 km/h.",
+            "25": "A B-33 speed-limit sign showing 25 km/h.",
+            "30": "A B-33 speed-limit sign showing 30 km/h.",
+            "35": "A B-33 speed-limit sign showing 35 km/h.",
+            "40": "A B-33 speed-limit sign showing 40 km/h.",
+            "45": "A B-33 speed-limit sign showing 45 km/h.",
+            "50": "A B-33 speed-limit sign showing 50 km/h.",
+            "55": "A B-33 speed-limit sign showing 55 km/h.",
+            "60": "A B-33 speed-limit sign showing 60 km/h.",
+            "65": "A B-33 speed-limit sign showing 65 km/h.",
+            "70": "A B-33 speed-limit sign showing 70 km/h.",
+            "75": "A B-33 speed-limit sign showing 75 km/h.",
+            "80": "A B-33 speed-limit sign showing 80 km/h.",
+            "90": "A B-33 speed-limit sign showing 90 km/h.",
+            "100": "A B-33 speed-limit sign showing 100 km/h.",
+            "110": "A B-33 speed-limit sign showing 110 km/h.",
+            "120": "A B-33 speed-limit sign showing 120 km/h.",
+            "130": "A B-33 speed-limit sign showing 130 km/h.",
+            "140": "A B-33 speed-limit sign showing 140 km/h.",
+            "none": "No B-33 speed-limit sign: a zone sign, end of zone, end of limit, another sign, or no sign.",
+            "unreadable": "A B-33 speed-limit sign is present but its value cannot be read."
+          }
+        }
+      }
+    }
+  },
+  "status": 400,
+  "headers": {
+    "date": "Thu, 12 Nov 2026 15:33:19 GMT",
+    "content-type": "application/json"
+  },
+  "removed_header_names": [
+    "access-control-allow-origin",
+    "access-control-expose-headers",
+    "alt-svc",
+    "cf-ray",
+    "connection",
+    "permissions-policy",
+    "referrer-policy",
+    "server",
+    "set-cookie",
+    "transfer-encoding",
+    "x-content-type-options",
+    "x-generation-id",
+    "x-openrouter-error-origin"
+  ],
+  "body": {
+    "error": {
+      "message": "HTTP 400: {\"detail\":{\"error_type\":\"api_usage_error\",\"message\":\"Invalid image dimensions.\"}}",
+      "code": 400
+    }
+  }
+}
