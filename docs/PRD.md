@@ -1,397 +1,398 @@
-# PRD — Map QA: Speed-Limit Sign Review for Kraków
+# PRD — Map QA: przegląd znaków ograniczenia prędkości w Krakowie
 
 ---
 
-## 1. Executive Summary
+## 1. Podsumowanie
 
-A command-line tool for a map QA analyst that reads the value of speed-limit signs from street-photo crops, compares it with the OpenStreetMap speed limit of the nearest road, and produces a Markdown report and a review queue for manual checking. Each sign is read through an escalation chain: a decision model first, a general-purpose LLM when the decision model is uncertain, and the analyst when neither can answer. Input data come from a configurable source (local files or a Databricks SQL warehouse). This document defines the MVP (phase 1), which proves the workflow and measures how well the models read signs on a small labelled sample; later phases are listed in section 13.
-
----
-
-## 2. Problem Statement
-
-Speed limits in map data are often missing, outdated or attached to the wrong road. Today an analyst finds a street photo near a road, reads the sign, and compares it with the map by hand. There is no repeatable list of where to look first, no record of why a case was skipped, and no shared record of what was already reviewed.
-
-Automatic sign reading must also know when not to answer. In the exercise sign set, 30 of 119 crops do not show a readable speed-limit value (zone signs, zone ends, no-entry, cancelled signs, other objects, one unreadable sign). An automatic reader that always gives a speed value would turn these into false map errors. Most street photos (all Panoramax photos) have no sign detections at all, so a reader that works from the image alone is needed to scale beyond the Mapillary sample. The analyst needs the machine to answer the clear cases, pass the unclear ones on, and send to a human only what remains unknown.
-
-The nearest road to a sign is also not always the road the sign applies to. In the Kraków sample, 18 of the 31 numeric sign–road pairs disagree. A naive "values differ → map error" comparison would mostly report assignment problems. The analyst needs evidence side by side and an explicit statement of uncertainty, not a verdict.
+Narzędzie CLI dla analityka map QA. Odczytuje wartość znaków ograniczenia prędkości z wycinków zdjęć ulicznych, porównuje ją z ograniczeniem prędkości OpenStreetMap najbliższej drogi i tworzy raport Markdown oraz kolejkę do ręcznej kontroli. Każdy znak jest odczytywany kaskadą eskalacji: najpierw model decyzyjny, przy jego niepewności zwykły LLM, a gdy żaden nie odpowie, analityk. Dane wejściowe pochodzą z konfigurowalnego źródła: plików lokalnych albo SQL warehouse Databricks. Dokument definiuje MVP (faza 1), który sprawdza przepływ pracy i mierzy na małej próbce z etykietami, jak dobrze modele czytają znaki. Kolejne fazy opisuje sekcja 13.
 
 ---
 
-## 3. Users / Personas
+## 2. Problem
 
-**Map QA analyst (primary).** Works with OSM data daily. Works through the manual queue: looks at each sign crop that the models could not read and enters the value. Reviews every `mismatch` and `map_missing` candidate and records a verdict: problem confirmed, no problem, or cannot assess. Edits the map outside this tool.
+Ograniczenia prędkości w danych mapowych często są nieaktualne, brakuje ich albo są przypisane do złej drogi. Dziś analityk ręcznie szuka zdjęcia przy drodze, odczytuje znak i porównuje go z mapą. Nie ma powtarzalnej listy, od czego zacząć, zapisu, dlaczego przypadek pominięto, ani wspólnego zapisu tego, co już przejrzano.
 
-**QA lead (secondary).** Reads the summary and evaluation sections only: how many signs each tier answered, how many reached the manual queue, how accurate the accepted answers were, what the calls cost. Uses it to decide whether the chain is worth extending to more data and questions.
+Automatyczny odczyt znaku musi też wiedzieć, kiedy nie odpowiadać. W zestawie znaków z ćwiczenia 30 ze 119 wycinków nie pokazuje czytelnej wartości ograniczenia: są tam znaki strefy, końca strefy, zakazu wjazdu, znaki przekreślone, inne obiekty i jeden nieczytelny znak. Czytnik, który zawsze podaje wartość prędkości, zamieniłby je w fałszywe błędy mapy. Większość zdjęć ulicznych (wszystkie zdjęcia Panoramax) nie ma żadnych detekcji znaków, więc do skalowania poza próbkę Mapillary potrzebny jest czytnik działający na samym obrazie. Maszyna ma rozstrzygać jasne przypadki, przekazywać dalej niejasne, a człowiekowi zostawiać tylko to, co nadal nieznane.
 
-**Coding agent operating the tool (secondary).** An AI agent (for example Claude Code or Codex) runs the CLI on the analyst's behalf. It is told in natural language where the data are and which mode to run, and expresses that only through the documented configuration and options, without editing code. It never sees credential values, only the names of environment variables.
-
----
-
-## 4. Main Flows
-
-### 4.1 Generate the report (happy path)
-
-1. The user or agent runs the tool from the command line. The data source for each dataset is resolved as described in 4.6 (default: local files). The model mode is chosen as described in 4.5 (default: `off`).
-2. The system validates that every required dataset is reachable in its configured source and has the required columns.
-3. The system reads the sign set (sign photos, crops, nearest OSM road per sign) and the OSM roads, read-only, and records for each dataset its source, location, row count and read time.
-4. For each sign, the system evaluates the sign-to-road link (4.3). An untrusted link is still read by the chain for evaluation, but it is not compared with the map.
-5. For each sign crop, the system obtains the sign value through the escalation chain (4.4).
-6. For each sign with a trusted link and an accepted value, the system takes the OSM speed tags of the linked road and assigns one outcome: `match`, `mismatch`, `map_missing`, `not_comparable` (definitions in section 11).
-7. The system writes a Markdown report, a results CSV with one row per sign, and a review CSV with the manual queue and the candidates.
-8. The command prints the output paths, outcome counts, and requests, cache hits and cost per tier, and exits with code 0.
-
-### 4.2 Work through the manual queue and review candidates
-
-1. The analyst opens the review CSV and the Markdown report, which link to the crop and full photo for each row.
-2. For each queued sign, the analyst enters the sign value (a number in km/h, `none` or `unreadable`).
-3. For each `mismatch` or `map_missing` candidate, the analyst records a verdict (`confirmed`, `no_problem`, `cannot_assess`) and an optional comment.
-4. The analyst re-runs the tool. The system keeps all entered values, uses human values for the comparison without calling any model, and shows the review status per row and in the summary.
-
-### 4.3 Untrusted sign-to-road link
-
-1. A sign has a link flag (for example `ambiguous_candidates`, `poor_heading_alignment`, `service_way`, `outside_standard_25m`), its nearest road is not found in the OSM roads dataset, or the sign is outside the Kraków area.
-2. The system does not compare the sign with the map. The outcome is `abstain` with the reason.
-3. The sign is still read by the chain (it counts for model evaluation) and is listed in the "Cannot compare" section with its reason.
-
-### 4.4 Escalation chain for reading a sign crop
-
-1. **Human value:** if the analyst already entered a value for this sign, it is used with `tier=human`; no model is called.
-2. **Cache:** if an answer for the same image, model and question version is cached, it is used; no call is made.
-3. **Tier 1 — decision model:** the system sends the crop and a neutral question with a closed answer set (section 11). The model returns a probability for each answer.
-   - Top answer is a value or `none` with probability ≥ the confidence threshold → accepted, `tier=decision_model`.
-   - Probability below the threshold, top answer `unreadable`, or call failure (`model_unavailable`) → tier 2.
-4. **Tier 2 — general-purpose multimodal LLM, medium reasoning:** the system sends the same crop and question, without the tier-1 answer.
-   - Answer is a value or `none` from the closed set → accepted, `tier=llm`.
-   - `unreadable`, answer outside the set, or call failure → manual queue, outcome `pending_human`.
-5. **Tier 3 — human:** the sign appears in the manual queue until the analyst enters a value.
-6. Every stored answer records the tier, model identifier, answer, tier-1 probabilities, and the escalation reason for each tier passed.
-
-### 4.5 Model modes
-
-1. `off` (default): no model is called. Every sign without a human value goes to the manual queue. This tests the whole workflow at zero cost.
-2. `cache`: only cached answers are used. Signs without a cached answer go down the chain as `model_unavailable` and end in the manual queue.
-3. `live`: tiers are called within their request and cost limits. Before the first paid call, the command prints the number of crops to send and the limits, and asks for confirmation unless a confirmation option is given.
-4. A sample option restricts the run to a listed set of sign ids (for example the evaluation sample in section 12).
-
-### 4.6 Choose the data source
-
-1. The source is selected by command option, environment variable or configuration file, in that order of precedence. With none given, the source is local files.
-2. The source can be set for all datasets or per dataset.
-3. The configuration names each dataset's location: a file path for local files; catalog, schema and table for Databricks, plus the SQL warehouse identifier.
-4. Credentials are never written in the configuration file. It names environment variables (host, token, warehouse), and the system reads their values at run time.
-5. Before reading, the system prints the resolved source and location of every dataset, without credential values. A dry-run option stops here.
-6. The system runs only read queries against Databricks.
-7. After reading, the system compares row counts with the snapshot counts and prints a warning (not an error) when they differ.
-
-### 4.7 Errors
-
-1. **Missing input or column:** the system stops before any model call, prints the dataset and missing file or column, writes no report, and exits non-zero.
-2. **Databricks unavailable:** missing variable, authentication error, permission error, failed query or timeout → the run stops before any model call with the dataset and error category, and exits non-zero. A pending query is polled by its identifier until the timeout and never resubmitted. There is no silent fallback to local files.
-3. **Model failure or budget exhausted:** the failing tier is skipped as `model_unavailable` for the affected signs, which continue down the chain. When a tier's limit is reached, it is not called again in the run. The run completes.
-4. **Invalid review CSV:** a verdict or human value outside its allowed set stops the run, prints the row and value, and leaves the file unchanged.
+Najbliższa droga nie zawsze jest drogą, której znak dotyczy. W próbce z Krakowa 18 z 31 liczbowych par znak–droga się nie zgadza. Naiwne porównanie „wartości różne → błąd mapy” zgłaszałoby głównie problemy z przypisaniem. Analityk potrzebuje dowodów obok siebie i jawnej informacji o niepewności, a nie werdyktu.
 
 ---
 
-## 5. User Stories
+## 3. Użytkownicy
 
-1. As a map QA analyst, I want a list of roads where the sign value differs from the OSM speed limit or the speed limit is missing, so that I can review the likely problems first.
-2. As a map QA analyst, I want crops that the decision model is unsure about to be re-read by a general-purpose model before they reach me, so that I only read the signs that machines could not.
-3. As a map QA analyst, I want the manual queue to show both model answers and why each escalated, so that I understand what is hard about the crop.
-4. As a map QA analyst, I want non-speed signs (zones, zone ends, no-entry) to be answered as `none` rather than as a speed value, so that they do not become false map errors.
-5. As a map QA analyst, I want my entered values and verdicts to survive a re-run, so that I do not lose review work.
-6. As a QA lead, I want accuracy, false acceptances, escalation rate and cost per tier on a labelled sample, so that I can decide whether to extend the chain.
-7. As a QA lead, I want the whole workflow to run with models switched off, so that the team can test it before any money is spent.
-8. As a coding agent, I want one documented way to set where each dataset lives and which model mode to use, so that I can follow instructions without changing code.
-9. As a pipeline maintainer, I want any input or Databricks failure to stop the run with the dataset name and error category, so that a report is never built from partial data.
+**Analityk map QA (główny).** Codziennie pracuje z danymi OSM. Przechodzi kolejkę ręczną: ogląda każdy wycinek, którego modele nie odczytały, i wpisuje wartość. Przegląda każdego kandydata `mismatch` i `map_missing` i zapisuje werdykt: problem potwierdzony, brak problemu albo nie da się ocenić. Mapę edytuje poza tym narzędziem.
+
+**Lider QA (drugorzędny).** Czyta tylko podsumowanie i ewaluację: ile znaków rozstrzygnął każdy tier, ile trafiło do kolejki ręcznej, jak trafne były przyjęte odpowiedzi i ile kosztowały wywołania. Na tej podstawie decyduje, czy rozszerzać kaskadę na kolejne dane i pytania.
+
+**Agent programistyczny obsługujący narzędzie (drugorzędny).** Agent AI (np. Claude Code albo Codex) uruchamia CLI w imieniu analityka. Dostaje w języku naturalnym informację, gdzie są dane i jakiego trybu użyć, i wyraża to wyłącznie przez udokumentowaną konfigurację i opcje, bez zmiany kodu. Nigdy nie widzi wartości poświadczeń, tylko nazwy zmiennych środowiskowych.
 
 ---
 
-## 6. Acceptance Criteria
+## 4. Główne przepływy
 
-### Inputs and safety
+### 4.1 Wygenerowanie raportu (ścieżka główna)
 
-- **AC-01:** After a run, the SHA-256 hash of every local input file is identical to the hash before the run.
-- **AC-02:** A missing required file or column stops the run before any model call, prints the dataset and the missing item, writes no report, and exits non-zero.
-- **AC-03:** Two runs on identical inputs, an identical review CSV and a complete cache produce byte-identical Markdown reports, except for the generation timestamp line, and the second run makes zero model calls.
-- **AC-04:** No credential value appears in console output, logs, reports, CSV files or the cache.
+1. Użytkownik lub agent uruchamia narzędzie z wiersza poleceń. Źródło każdego zbioru danych jest ustalane jak w 4.6 (domyślnie pliki lokalne). Tryb modeli jest wybierany jak w 4.5 (domyślnie `off`).
+2. System sprawdza, czy każdy wymagany zbiór jest dostępny w skonfigurowanym źródle i ma wymagane kolumny.
+3. System czyta zestaw znaków (zdjęcia, wycinki, najbliższą drogę OSM dla znaku) i drogi OSM, tylko do odczytu. Dla każdego zbioru zapisuje źródło, lokalizację, liczbę wierszy i czas odczytu.
+4. Dla każdego znaku system ocenia połączenie znak–droga (4.3). Znak z niezaufanym połączeniem nadal przechodzi przez kaskadę na potrzeby ewaluacji, ale nie jest porównywany z mapą.
+5. Dla każdego wycinka system uzyskuje wartość znaku kaskadą eskalacji (4.4).
+6. Dla każdego znaku z zaufanym połączeniem i przyjętą wartością system bierze tagi prędkości OSM powiązanej drogi i nadaje jeden wynik: `match`, `mismatch`, `map_missing` albo `not_comparable` (definicje w sekcji 11).
+7. System zapisuje raport Markdown, CSV wyników z jednym wierszem na znak oraz CSV przeglądu z kolejką ręczną i kandydatami.
+8. Polecenie wypisuje ścieżki wyników, liczności wyników oraz liczbę żądań, trafień cache i koszt na tier, i kończy się kodem 0.
 
-### Sign-to-road link
+### 4.2 Kolejka ręczna i przegląd kandydatów
 
-- **AC-05:** Every one of the 119 signs in the sign set appears exactly once in the results CSV, with exactly one outcome.
-- **AC-06:** A sign with a non-empty link flag, a nearest road that is not found in the OSM roads dataset, or an area other than Kraków gets `abstain` with the reason and is not compared with the map.
-- **AC-07:** Abstained signs are still read by the chain and included in the evaluation section.
+1. Analityk otwiera CSV przeglądu i raport Markdown, które linkują do wycinka i pełnego zdjęcia w każdym wierszu.
+2. Dla każdego znaku w kolejce analityk wpisuje wartość: liczbę w km/h, `none` albo `unreadable`.
+3. Dla każdego kandydata `mismatch` lub `map_missing` analityk zapisuje werdykt (`confirmed`, `no_problem`, `cannot_assess`) i opcjonalny komentarz.
+4. Analityk uruchamia narzędzie ponownie. System zachowuje wszystkie wpisane wartości, używa wartości ludzkich do porównania bez wywoływania modeli i pokazuje stan przeglądu w każdym wierszu i w podsumowaniu.
 
-### Escalation chain
+### 4.3 Niezaufane połączenie znak–droga
 
-- **AC-08:** A tier-1 answer that is a value or `none` with probability ≥ the confidence threshold is accepted with `tier=decision_model`, and no tier-2 call is made for that sign.
-- **AC-09:** A tier-1 answer below the threshold, a top answer of `unreadable`, or a tier-1 failure results in exactly one tier-2 call.
-- **AC-10:** A tier-1 or tier-2 failure (HTTP error, timeout, budget exhausted) is recorded as `model_unavailable` with the error category; it is never recorded as `none`, `unreadable` or a value.
-- **AC-11:** A tier-2 answer of `unreadable`, an answer outside the closed set, or a tier-2 failure puts the sign in the manual queue as `pending_human` with the reason.
-- **AC-12:** The tier-2 request contains the same crop and question as tier 1 and does not contain the tier-1 answer or probabilities.
-- **AC-13:** No model request contains map values, labels, the Mapillary detector value, the file name or the photo id; the request log shows only the image, the question and the answer set.
-- **AC-14:** The confidence threshold, request limit, cost limit and timeout of each tier are configurable and printed in the report header. In the MVP evaluation, the threshold is 0.80 and is not changed after the first evaluation call.
-- **AC-15:** Every attempt, including failed ones, counts against its tier's request limit. No call is retried automatically. When a limit is reached, the tier is not called again in the run, and the summary states which limit was reached and how many signs were affected.
-- **AC-16:** A cached answer for the same image hash, model identifier and question version is reused without a call; the summary shows cache hits per tier.
-- **AC-17:** In mode `off`, no model is called and every sign without a human value is `pending_human`. In mode `cache`, no network call to a model is made.
-- **AC-18:** In mode `live`, the command shows the number of crops and the limits and makes no call until confirmed.
+1. Znak ma flagę połączenia (np. `ambiguous_candidates`, `poor_heading_alignment`, `service_way`, `outside_standard_25m`), jego najbliższej drogi nie ma w zbiorze dróg OSM albo znak leży poza Krakowem.
+2. System nie porównuje znaku z mapą. Wynik to `abstain` z przyczyną.
+3. Znak nadal przechodzi przez kaskadę (liczy się do ewaluacji modeli) i trafia do sekcji „Nie da się porównać” z przyczyną.
 
-### Comparison with the map
+### 4.4 Kaskada eskalacji dla wycinka
 
-- **AC-19:** For each compared sign, the results CSV and report show the sign value and its tier, the OSM way id, and the raw OSM `maxspeed`, `maxspeed:forward`, `maxspeed:backward` and `maxspeed:conditional` values.
-- **AC-20:** `match`: the sign value and the OSM `maxspeed` are both numeric in km/h and equal, and no directional or conditional speed tag is present.
-- **AC-21:** `mismatch`: as AC-20, but the values differ.
-- **AC-22:** `map_missing`: the sign value is numeric and the road has none of the four OSM speed tags.
-- **AC-23:** `not_comparable`: the sign value is `none`, or the OSM speed is non-numeric (for example `PL:urban`, `none`, `50;70`), or a directional or conditional speed tag is present. The raw values are shown.
-- **AC-24:** The outcome is `pending_human` while no value has been accepted for the sign.
+1. **Wartość ludzka:** jeśli analityk już wpisał wartość dla znaku, jest ona używana z `tier=human`; żaden model nie jest wywoływany.
+2. **Cache:** jeśli jest zapisana odpowiedź dla tego samego obrazu, modelu i wersji pytania, jest używana bez wywołania.
+3. **Tier 1 — model decyzyjny:** system wysyła wycinek i neutralne pytanie z zamkniętym zbiorem odpowiedzi (sekcja 11). Model zwraca prawdopodobieństwo każdej odpowiedzi.
+   - Najlepsza odpowiedź to wartość lub `none` z prawdopodobieństwem ≥ progu pewności → przyjęta, `tier=decision_model`.
+   - Prawdopodobieństwo poniżej progu, najlepsza odpowiedź `unreadable` albo błąd wywołania (`model_unavailable`) → tier 2.
+4. **Tier 2 — zwykły multimodalny LLM, średnie rozumowanie:** system wysyła ten sam wycinek i pytanie, bez odpowiedzi tier 1.
+   - Odpowiedź to wartość lub `none` z zamkniętego zbioru → przyjęta, `tier=llm`.
+   - `unreadable`, odpowiedź spoza zbioru albo błąd wywołania → kolejka ręczna, wynik `pending_human`.
+5. **Tier 3 — człowiek:** znak jest w kolejce ręcznej, dopóki analityk nie wpisze wartości.
+6. Każda zapisana odpowiedź zawiera tier, identyfikator modelu, odpowiedź, prawdopodobieństwa tier 1 i przyczynę eskalacji na każdym przejściu.
 
-### Outputs and review
+### 4.5 Tryby modeli
 
-- **AC-25:** Each run writes one Markdown report, one results CSV and one review CSV.
-- **AC-26:** The Markdown report contains, in order: header (sources, thresholds, limits, models, dates, disclaimer), summary, candidates (`mismatch`, `map_missing`), manual queue, cannot compare, evaluation.
-- **AC-27:** Every row that shows a crop links to the crop and full photo by relative path and shows the author, source and licence.
-- **AC-28:** The header contains the sentence "Rozbieżność znaku i mapy nie oznacza automatycznie błędu mapy."
-- **AC-29:** Re-running keeps every non-empty human value, verdict and comment in the review CSV unchanged, and adds rows only for new queue items and candidates.
-- **AC-30:** A sign with a human value is never sent to a model in later runs.
-- **AC-31:** A verdict outside `confirmed`, `no_problem`, `cannot_assess` or empty, or a human value outside the answer set, stops the run with the row and value, and leaves the review CSV unchanged.
+1. `off` (domyślny): żaden model nie jest wywoływany. Każdy znak bez wartości ludzkiej trafia do kolejki ręcznej. Pozwala przetestować cały przepływ bez kosztów.
+2. `cache`: używane są tylko odpowiedzi z cache. Znaki bez odpowiedzi w cache przechodzą dalej jako `model_unavailable` i kończą w kolejce ręcznej.
+3. `live`: tiery są wywoływane w granicach limitów żądań i kosztu. Przed pierwszym płatnym wywołaniem polecenie wypisuje liczbę wycinków do wysłania i limity, a potem prosi o potwierdzenie, chyba że podano opcję potwierdzenia.
+4. Opcja próbki ogranicza przebieg do listy identyfikatorów znaków (np. próbki ewaluacyjnej z sekcji 12).
 
-### Evaluation
+### 4.6 Wybór źródła danych
 
-- **AC-32:** The evaluation section reads the sign labels only for evaluation; no label value reaches a model, the chain or the comparison.
-- **AC-33:** For each tier and for the chain as a whole, the evaluation reports, with explicit denominators: signs sent, accepted, escalated, failed; accuracy of accepted answers on numeric labels; share of negative labels (label not a speed value) answered `none` or escalated; false acceptances (an accepted answer that differs from the label); requests; cost; cost per accepted answer.
-- **AC-34:** Labels with status `uncertain` and the label `unreadable` are excluded from accuracy denominators and listed separately with their count.
-- **AC-35:** The evaluation shows the Mapillary detector as a zero-cost baseline with the same metrics: a class `maximum-speed-limit-N` (not `end-of-…`) maps to value N; every other class or an empty class maps to `none`.
-- **AC-36:** The evaluation can recompute tier-1 acceptance at other thresholds from stored probabilities without new calls, and labels this as exploratory.
+1. Źródło wybiera się opcją polecenia, zmienną środowiskową albo plikiem konfiguracji, w tej kolejności pierwszeństwa. Bez żadnego z nich źródłem są pliki lokalne.
+2. Źródło można ustawić dla wszystkich zbiorów albo osobno dla każdego.
+3. Konfiguracja podaje lokalizację każdego zbioru: ścieżkę pliku dla plików lokalnych; katalog, schemat i tabelę oraz identyfikator SQL warehouse dla Databricks.
+4. Poświadczenia nigdy nie są zapisywane w pliku konfiguracji. Plik podaje nazwy zmiennych środowiskowych (host, token, warehouse), a system czyta ich wartości w chwili uruchomienia.
+5. Przed odczytem system wypisuje ustalone źródło i lokalizację każdego zbioru, bez wartości poświadczeń. Opcja dry-run kończy przebieg w tym miejscu.
+6. Wobec Databricks system wykonuje wyłącznie zapytania odczytu.
+7. Po odczycie system porównuje liczby wierszy z licznościami snapshotu i przy różnicy wypisuje ostrzeżenie (nie błąd).
 
-### Data sources
+### 4.7 Błędy
 
-- **AC-37:** With no source configured, the tool reads all datasets from local files.
-- **AC-38:** Command option overrides environment variable, which overrides the configuration file; the report header states which one set each dataset's source.
-- **AC-39:** A run with OSM roads from Databricks and the sign set from local files produces the same outcomes and counts as a run with all datasets local.
-- **AC-40:** A configuration file containing a credential value is rejected with an error naming the field, without printing the value.
-- **AC-41:** Against Databricks, the tool submits only `SELECT` statements and writes them to the run log.
-- **AC-42:** A missing host, token or warehouse variable stops the run before any query, naming the missing variable.
-- **AC-43:** A dataset row count that differs from the snapshot count shows a warning with both numbers; the run continues.
-- **AC-44:** The dry-run option prints the resolved source and location of each dataset and the number of model calls each tier would make at most, and exits with code 0 without reading data or calling a model.
+1. **Brak wejścia lub kolumny:** system zatrzymuje się przed jakimkolwiek wywołaniem modelu, wypisuje zbiór i brakujący plik lub kolumnę, nie zapisuje raportu i kończy się kodem niezerowym.
+2. **Databricks niedostępny:** brak zmiennej, błąd uwierzytelnienia, brak uprawnień, nieudane zapytanie albo przekroczenie czasu → przebieg zatrzymuje się przed jakimkolwiek wywołaniem modelu z nazwą zbioru i kategorią błędu, kod niezerowy. Oczekujące zapytanie jest odpytywane po identyfikatorze do limitu czasu i nigdy nie jest wysyłane ponownie. Nie ma cichego przełączenia na pliki lokalne.
+3. **Błąd modelu lub wyczerpany budżet:** tier jest pomijany jako `model_unavailable` dla danych znaków, które idą dalej kaskadą. Po osiągnięciu limitu tier nie jest już wywoływany w tym przebiegu. Przebieg kończy się normalnie.
+4. **Błędny CSV przeglądu:** werdykt lub wartość ludzka spoza dozwolonego zbioru zatrzymuje przebieg, wypisuje wiersz i wartość i zostawia plik bez zmian.
 
 ---
 
-## 7. Out of Scope (MVP)
+## 5. Historyjki użytkownika
 
-- **User interface:** no HTML report, dashboard, map view or buttons. The analyst works in the Markdown report and CSV files. (Phase 2.)
-- **Surface check:** 99 of 100 reference surface labels are `paved`, so model accuracy on surface cannot be measured. (Phase 2, after an unpaved sample is labelled.)
-- **Missing-attribute statistics for all roads:** not needed to prove the workflow. (Phase 2.)
-- **Overture speed limits:** their `when`/`between` rules need separate interpretation. (Phase 2.)
-- **The 561 street photos and their road links:** used only by the surface and other photo questions. (Phase 2.)
-- **Reading signs from full photos:** the MVP reads the provided crops only.
-- **Junction, lighting, lanes, sidewalk, road class from photos.** (Later phases.)
-- **`traffic_signs.geojson` as a second sign source.** (Later phases.)
-- **Escalating on disagreement between tier 1 and tier 2:** tier 2 is not shown tier 1's answer, and its in-set answer is accepted.
-- **Live map and photo APIs as inputs; Databricks through MCP; writing to Databricks; other warehouses.**
-- **Editing the map; model training; authentication; multiple users; notifications.**
+1. Jako analityk map QA chcę listy dróg, na których wartość znaku różni się od ograniczenia OSM albo ograniczenia brakuje, aby najpierw przeglądać prawdopodobne problemy.
+2. Jako analityk map QA chcę, aby wycinki, co do których model decyzyjny nie jest pewny, odczytał ponownie zwykły model, zanim trafią do mnie, abym czytał tylko znaki, których maszyny nie odczytały.
+3. Jako analityk map QA chcę, aby kolejka ręczna pokazywała odpowiedzi obu modeli i powód każdej eskalacji, abym rozumiał, co w wycinku jest trudne.
+4. Jako analityk map QA chcę, aby znaki inne niż ograniczenie prędkości (strefy, końce stref, zakaz wjazdu) dostawały odpowiedź `none`, a nie wartość prędkości, aby nie stały się fałszywymi błędami mapy.
+5. Jako analityk map QA chcę, aby wpisane wartości i werdykty przetrwały ponowne uruchomienie, abym nie tracił pracy.
+6. Jako lider QA chcę trafności, fałszywych przyjęć, odsetka eskalacji i kosztu na tier na próbce z etykietami, aby zdecydować o rozszerzeniu kaskady.
+7. Jako lider QA chcę uruchomić cały przepływ z wyłączonymi modelami, aby zespół mógł go przetestować, zanim wyda pieniądze.
+8. Jako agent programistyczny chcę jednego udokumentowanego sposobu wskazania, gdzie jest każdy zbiór i jakiego trybu modeli użyć, abym wykonywał polecenia bez zmiany kodu.
+9. Jako opiekun pipeline'u chcę, aby każdy błąd wejścia lub Databricks zatrzymywał przebieg z nazwą zbioru i kategorią błędu, aby raport nigdy nie powstał z niepełnych danych.
 
 ---
 
-## 8. Constraints
+## 6. Kryteria akceptacji
 
-### Business
+### Wejścia i bezpieczeństwo
 
-- All local input files are read-only. Outputs go to `reports/map-qa/`; the answer cache goes to an ignored data directory.
-- Licences and attribution must be preserved: OSM data under ODbL 1.0, photos under CC BY-SA 4.0 with author credit.
-- The sign labels were produced by AI agents and are not fully human-verified; they are a working reference, not ground truth. Each disagreement needs a human look at the crop.
-- Paid model calls need a request and cost budget allocated by the course trainer before the first call. API keys and Databricks tokens are read only from environment variables and are never printed or logged.
-- The shared Databricks token has the `sql` scope; read-only behaviour is enforced by the tool. Queries can start a shared warehouse; each dataset is read once per run.
+- **AC-01:** Po przebiegu SHA-256 każdego lokalnego pliku wejściowego jest identyczny jak przed przebiegiem.
+- **AC-02:** Brak wymaganego pliku lub kolumny zatrzymuje przebieg przed jakimkolwiek wywołaniem modelu, wypisuje zbiór i brakujący element, nie zapisuje raportu i kończy się kodem niezerowym.
+- **AC-03:** Dwa przebiegi na identycznych wejściach, z identycznym CSV przeglądu i pełnym cache dają bajtowo identyczne raporty Markdown, z wyjątkiem linii czasu wygenerowania, a drugi przebieg wykonuje zero wywołań modeli.
+- **AC-04:** Żadna wartość poświadczeń nie pojawia się w konsoli, logach, raportach, plikach CSV ani w cache.
 
-### Functional
+### Połączenie znak–droga
 
-- Sign set: 119 sign photos with crops from 103 sequences; 99 in Kraków, 20 in other Polish cities.
-- Tier 1 is a decision model returning probabilities over a closed answer set. Tier 2 is a general-purpose multimodal LLM used at medium reasoning. Concrete models are chosen in the ADR.
-- MVP request limits: tier 1 at most 25 requests, tier 2 at most 10 requests, both including failures; lower if the trainer's allocation is lower. Timeout 40 s per request.
-- Report language: Polish for headings and labels; identifiers, tag keys and raw values unchanged.
-- Without network access, modes `off` and `cache` complete on local data.
+- **AC-05:** Każdy ze 119 znaków zestawu pojawia się dokładnie raz w CSV wyników, z dokładnie jednym wynikiem.
+- **AC-06:** Znak z niepustą flagą połączenia, z najbliższą drogą nieobecną w zbiorze dróg OSM albo z obszarem innym niż Kraków dostaje `abstain` z przyczyną i nie jest porównywany z mapą.
+- **AC-07:** Znaki z `abstain` nadal przechodzą przez kaskadę i są uwzględnione w ewaluacji.
 
-### External data references
+### Kaskada eskalacji
 
-Local files are in `course-materials/exercise-data/map-qa/`. Databricks tables are in `workspace.map_qa`.
+- **AC-08:** Odpowiedź tier 1, która jest wartością lub `none` z prawdopodobieństwem ≥ progu pewności, jest przyjęta z `tier=decision_model`, a dla tego znaku nie ma wywołania tier 2.
+- **AC-09:** Odpowiedź tier 1 poniżej progu, najlepsza odpowiedź `unreadable` albo błąd tier 1 dają dokładnie jedno wywołanie tier 2.
+- **AC-10:** Błąd tier 1 lub tier 2 (błąd HTTP, przekroczenie czasu, wyczerpany budżet) jest zapisywany jako `model_unavailable` z kategorią błędu; nigdy jako `none`, `unreadable` ani wartość.
+- **AC-11:** Odpowiedź tier 2 `unreadable`, odpowiedź spoza zamkniętego zbioru albo błąd tier 2 umieszcza znak w kolejce ręcznej jako `pending_human` z przyczyną.
+- **AC-12:** Żądanie tier 2 zawiera ten sam wycinek i pytanie co tier 1 i nie zawiera odpowiedzi ani prawdopodobieństw tier 1.
+- **AC-13:** Żadne żądanie do modelu nie zawiera wartości mapy, etykiet, wartości detektora Mapillary, nazwy pliku ani identyfikatora zdjęcia; log żądań pokazuje tylko obraz, pytanie i zbiór odpowiedzi.
+- **AC-14:** Próg pewności, limit żądań, limit kosztu i timeout każdego tieru są konfigurowalne i wypisywane w nagłówku raportu. W ewaluacji MVP próg wynosi 0,80 i nie zmienia się po pierwszym wywołaniu ewaluacyjnym.
+- **AC-15:** Każda próba, także nieudana, liczy się do limitu żądań swojego tieru. Żadne wywołanie nie jest ponawiane automatycznie. Po osiągnięciu limitu tier nie jest już wywoływany w przebiegu, a podsumowanie podaje, który limit osiągnięto i ilu znaków to dotyczyło.
+- **AC-16:** Odpowiedź z cache dla tego samego hasha obrazu, identyfikatora modelu i wersji pytania jest używana bez wywołania; podsumowanie podaje trafienia cache na tier.
+- **AC-17:** W trybie `off` żaden model nie jest wywoływany, a każdy znak bez wartości ludzkiej ma `pending_human`. W trybie `cache` nie ma żadnego wywołania sieciowego do modelu.
+- **AC-18:** W trybie `live` polecenie pokazuje liczbę wycinków i limity i nie wykonuje wywołań przed potwierdzeniem.
 
-| Data | Local file | Databricks table | When used |
+### Porównanie z mapą
+
+- **AC-19:** Dla każdego porównanego znaku CSV wyników i raport pokazują wartość znaku i jej tier, identyfikator drogi OSM oraz surowe wartości OSM `maxspeed`, `maxspeed:forward`, `maxspeed:backward` i `maxspeed:conditional`.
+- **AC-20:** `match`: wartość znaku i OSM `maxspeed` są liczbami w km/h i są równe, a nie ma żadnego kierunkowego ani warunkowego tagu prędkości.
+- **AC-21:** `mismatch`: jak w AC-20, ale wartości są różne.
+- **AC-22:** `map_missing`: wartość znaku jest liczbą, a droga nie ma żadnego z czterech tagów prędkości OSM.
+- **AC-23:** `not_comparable`: wartość znaku to `none`, albo prędkość OSM nie jest liczbą w km/h (np. `PL:urban`, `none`, `50;70`, `30 mph`), albo jest kierunkowy lub warunkowy tag prędkości. Pokazywane są surowe wartości.
+- **AC-24:** Wynik to `pending_human`, dopóki dla znaku nie przyjęto wartości.
+
+### Wyniki i przegląd
+
+- **AC-25:** Każdy przebieg zapisuje jeden raport Markdown, jeden CSV wyników i jeden CSV przeglądu.
+- **AC-26:** Raport Markdown zawiera kolejno: nagłówek (źródła, progi, limity, modele, daty, zastrzeżenie), podsumowanie, kandydatów (`mismatch`, `map_missing`), kolejkę ręczną, sekcję „Nie da się porównać” i ewaluację.
+- **AC-27:** Każdy wiersz pokazujący wycinek linkuje do wycinka i pełnego zdjęcia ścieżką względną i podaje autora, źródło i licencję.
+- **AC-28:** Nagłówek zawiera zdanie „Rozbieżność znaku i mapy nie oznacza automatycznie błędu mapy.”
+- **AC-29:** Ponowne uruchomienie zachowuje bez zmian każdą niepustą wartość ludzką, werdykt i komentarz w CSV przeglądu i dodaje wiersze tylko dla nowych pozycji kolejki i kandydatów.
+- **AC-30:** Znak z wartością ludzką nigdy nie jest wysyłany do modelu w kolejnych przebiegach.
+- **AC-31:** Werdykt spoza `confirmed`, `no_problem`, `cannot_assess` lub pustego, albo wartość ludzka spoza zbioru odpowiedzi, zatrzymuje przebieg z wierszem i wartością i zostawia CSV przeglądu bez zmian.
+
+### Ewaluacja
+
+- **AC-32:** Ewaluacja czyta etykiety znaków wyłącznie na potrzeby ewaluacji; żadna wartość etykiety nie trafia do modelu, kaskady ani porównania.
+- **AC-33:** Dla każdego tieru i całej kaskady ewaluacja podaje, z jawnymi mianownikami: znaki wysłane, przyjęte, eskalowane, błędy; trafność przyjętych odpowiedzi na etykietach liczbowych; udział etykiet negatywnych (etykieta nie jest wartością prędkości) z odpowiedzią `none` lub eskalacją; fałszywe przyjęcia (przyjęta odpowiedź różna od etykiety); żądania; koszt; koszt na przyjętą odpowiedź.
+- **AC-34:** Etykiety ze statusem `uncertain` i etykieta `unreadable` są wyłączone z mianowników trafności i wykazane osobno z licznością.
+- **AC-35:** Ewaluacja pokazuje detektor Mapillary jako bezkosztowy punkt odniesienia z tymi samymi metrykami: klasa `maximum-speed-limit-N` (nie `end-of-…`) daje wartość N; każda inna klasa lub brak klasy daje `none`.
+- **AC-36:** Ewaluacja potrafi przeliczyć przyjęcia tier 1 przy innych progach z zapisanych prawdopodobieństw, bez nowych wywołań, i oznacza to jako eksplorację.
+
+### Źródła danych
+
+- **AC-37:** Bez skonfigurowanego źródła narzędzie czyta wszystkie zbiory z plików lokalnych.
+- **AC-38:** Opcja polecenia ma pierwszeństwo przed zmienną środowiskową, a ta przed plikiem konfiguracji; nagłówek raportu podaje, co ustaliło źródło każdego zbioru.
+- **AC-39:** Przebieg z drogami OSM z Databricks i zestawem znaków z plików lokalnych daje te same wyniki i liczności co przebieg w pełni lokalny.
+- **AC-40:** Plik konfiguracji zawierający wartość poświadczenia jest odrzucany z błędem podającym nazwę pola, bez wypisania wartości.
+- **AC-41:** Wobec Databricks narzędzie wysyła wyłącznie instrukcje `SELECT` i zapisuje je w logu przebiegu.
+- **AC-42:** Brak zmiennej hosta, tokenu lub warehouse zatrzymuje przebieg przed jakimkolwiek zapytaniem i podaje nazwę brakującej zmiennej.
+- **AC-43:** Liczba wierszy całego zbioru różna od liczności snapshotu daje ostrzeżenie z obiema liczbami; przebieg trwa dalej.
+- **AC-44:** Opcja dry-run wypisuje ustalone źródło i lokalizację każdego zbioru oraz maksymalną liczbę wywołań każdego tieru i kończy się kodem 0, bez odczytu danych i bez wywołania modelu.
+
+---
+
+## 7. Poza zakresem (MVP)
+
+- **Interfejs użytkownika:** brak raportu HTML, dashboardu, widoku mapy i przycisków. Analityk pracuje na raporcie Markdown i plikach CSV. (Faza 2.)
+- **Kontrola nawierzchni:** 99 ze 100 etykiet referencyjnych to `paved`, więc nie da się zmierzyć trafności modelu dla nawierzchni. (Faza 2, po oznaczeniu próbki nieutwardzonej.)
+- **Statystyki brakujących atrybutów dla wszystkich dróg:** niepotrzebne do sprawdzenia przepływu. (Faza 2.)
+- **Ograniczenia prędkości Overture:** ich reguły `when`/`between` wymagają osobnej interpretacji. (Faza 2.)
+- **561 zdjęć ulicznych i ich połączenia z drogami:** potrzebne tylko do nawierzchni i innych pytań o zdjęcia. (Faza 2.)
+- **Odczyt znaków z pełnych zdjęć:** MVP czyta tylko dostarczone wycinki.
+- **Skrzyżowania, oświetlenie, pasy, chodniki, klasa drogi ze zdjęć.** (Kolejne fazy.)
+- **`traffic_signs.geojson` jako drugie źródło znaków.** (Kolejne fazy.)
+- **Eskalacja przy niezgodności tier 1 i tier 2:** tier 2 nie widzi odpowiedzi tier 1, a jego odpowiedź ze zbioru jest przyjmowana.
+- **Porównanie z dodatkowym modelem decyzyjnym:** wymaga osobnego limitu i budżetu dopisanego do PRD.
+- **API map i zdjęć na żywo jako wejścia; Databricks przez MCP; zapis do Databricks; inne hurtownie danych.**
+- **Edycja mapy; trening modeli; uwierzytelnianie; wielu użytkowników; powiadomienia.**
+
+---
+
+## 8. Ograniczenia
+
+### Biznesowe
+
+- Wszystkie lokalne pliki wejściowe są tylko do odczytu. Wyniki trafiają do `reports/map-qa/`, a cache odpowiedzi do ignorowanego katalogu danych.
+- Licencje i atrybucje muszą być zachowane: dane OSM na ODbL 1.0, zdjęcia na CC BY-SA 4.0 z podaniem autora.
+- Etykiety znaków przygotowały agenty AI i nie są w pełni zweryfikowane przez człowieka; to robocza referencja, a nie prawda wzorcowa. Każda niezgodność wymaga obejrzenia wycinka przez człowieka.
+- Płatne wywołania modeli wymagają limitu żądań i budżetu przyznanego przez prowadzącego przed pierwszym wywołaniem. Klucze API i tokeny Databricks są czytane wyłącznie ze zmiennych środowiskowych i nigdy nie są wypisywane ani logowane.
+- Wspólny token Databricks ma zakres `sql`; tryb tylko do odczytu wymusza narzędzie. Zapytania mogą uruchomić współdzielony warehouse; każdy zbiór jest czytany raz na przebieg.
+
+### Funkcjonalne
+
+- Zestaw znaków: 119 zdjęć z wycinkami ze 103 sekwencji; 99 w Krakowie, 20 w innych miastach Polski.
+- Tier 1 to model decyzyjny zwracający prawdopodobieństwa dla zamkniętego zbioru odpowiedzi. Tier 2 to zwykły multimodalny LLM ze średnim rozumowaniem. Konkretne modele wybiera ADR.
+- Limity żądań MVP: tier 1 najwyżej 25, tier 2 najwyżej 10, oba wliczając błędy; mniej, jeśli przydział prowadzącego jest mniejszy. Timeout 40 s na żądanie.
+- Język raportu: polski dla nagłówków i etykiet; identyfikatory, klucze tagów i surowe wartości bez zmian.
+- Bez dostępu do sieci tryby `off` i `cache` kończą się na danych lokalnych.
+
+### Zewnętrzne dane
+
+Pliki lokalne są w `course-materials/exercise-data/map-qa/`. Tabele Databricks są w `workspace.map_qa`.
+
+| Dane | Plik lokalny | Tabela Databricks | Kiedy używane |
 |---|---|---|---|
-| Sign photos | `signs/signs.csv`, `signs/photos/` | — (local only) | Sign position, area, sequence, author, licence, detector value (baseline only) |
-| Sign crops | `signs/crops/` | — (local only) | Image sent to the models; shown to the analyst |
-| Nearest OSM road per sign | `signs/nearest_osm.csv` | — (local only) | Sign-to-road link and flags |
-| OSM roads | `osm_roads.parquet` | `osm_roads` | OSM speed tags of the linked road |
-| Sign labels | `signs/labels.csv` | — (local only) | Evaluation only |
-| Source metadata | `sources.json` | — (local only) | Snapshot dates and row counts |
+| Zdjęcia znaków | `signs/signs.csv`, `signs/photos/` | — (tylko lokalnie) | Pozycja znaku, obszar, sekwencja, autor, licencja, wartość detektora (tylko punkt odniesienia) |
+| Wycinki znaków | `signs/crops/` | — (tylko lokalnie) | Obraz wysyłany do modeli; pokazywany analitykowi |
+| Najbliższa droga OSM | `signs/nearest_osm.csv` | — (tylko lokalnie) | Połączenie znak–droga i flagi |
+| Drogi OSM | `osm_roads.parquet` | `osm_roads` | Tagi prędkości powiązanej drogi |
+| Etykiety znaków | `signs/labels.csv` | — (tylko lokalnie) | Wyłącznie ewaluacja |
+| Metadane źródeł | `sources.json` | — (tylko lokalnie) | Daty snapshotu i liczności |
 
 ---
 
-## 9. UI Description
+## 9. Opis interfejsu
 
-The MVP has no graphical interface.
+MVP nie ma interfejsu graficznego.
 
-### 9.1 Command line
+### 9.1 Wiersz poleceń
 
-- Options: data source (all datasets or per dataset), configuration file, output directory, model mode (`off`, `cache`, `live`), sample (list of sign ids or a file), confidence threshold, per-tier request and cost limits, review CSV path, confirmation, dry-run.
-- An example configuration file lists every dataset with a local and a Databricks location and only the names of credential variables.
-- On success: output paths, an outcome table and a tier table (sent, accepted, escalated, failed, cache hits, requests, cost).
-- On failure: one error line naming the dataset, file, column, variable or review row; non-zero exit code.
+- Opcje: źródło danych (wszystkie zbiory lub osobno), plik konfiguracji, katalog wyników, tryb modeli (`off`, `cache`, `live`), próbka (lista identyfikatorów lub plik), próg pewności, limity żądań i kosztu na tier, ścieżka CSV przeglądu, potwierdzenie, dry-run.
+- Przykładowy plik konfiguracji podaje dla każdego zbioru lokalizację lokalną i w Databricks oraz tylko nazwy zmiennych z poświadczeniami.
+- Po sukcesie: ścieżki wyników, tabela wyników i tabela tierów (wysłane, przyjęte, eskalowane, błędy, trafienia cache, żądania, koszt).
+- Po błędzie: jedna linia z nazwą zbioru, pliku, kolumny, zmiennej albo wiersza przeglądu; kod niezerowy.
 
-### 9.2 Markdown report
+### 9.2 Raport Markdown
 
-- **Header:** generation time, data sources per dataset and how each was chosen, OSM snapshot date, model mode, model identifiers, threshold, limits, timeout, disclaimer (AC-28).
-- **Summary:** outcome counts; manual queue size; reviewed and confirmed counts.
-- **Candidates:** one row per `mismatch` / `map_missing`: sign id, crop link, sign value and tier, OSM way id, raw speed tags, distance, review status.
-- **Manual queue:** sign id, crop link, tier-1 top answer and probability, tier-2 answer, escalation reasons, human value.
-- **Cannot compare:** sign id, reason.
-- **Evaluation:** tables per AC-33 to AC-36.
-- Empty sections show "0 pozycji".
+- **Nagłówek:** czas wygenerowania, źródło każdego zbioru i sposób jego wyboru, data snapshotu OSM, tryb modeli, identyfikatory modeli, próg, limity, timeout, zastrzeżenie (AC-28).
+- **Podsumowanie:** liczności wyników; wielkość kolejki ręcznej; liczba przejrzanych i potwierdzonych.
+- **Kandydaci:** wiersz na każdy `mismatch` / `map_missing`: identyfikator znaku, link do wycinka, wartość znaku i tier, identyfikator drogi OSM, surowe tagi prędkości, dystans, stan przeglądu.
+- **Kolejka ręczna:** identyfikator znaku, link do wycinka, najlepsza odpowiedź i prawdopodobieństwo tier 1, odpowiedź tier 2, przyczyny eskalacji, wartość ludzka.
+- **Nie da się porównać:** identyfikator znaku, przyczyna.
+- **Ewaluacja:** tabele zgodnie z AC-33 do AC-36.
+- Puste sekcje pokazują „0 pozycji”.
 
-### 9.3 Review CSV
+### 9.3 CSV przeglądu
 
-- Columns: row id, row type (`queue` or `candidate`), sign id, OSM way id, tier-1 answer, tier-2 answer, human value (empty), outcome, verdict (empty), comment (empty).
+- Kolumny: identyfikator wiersza, typ wiersza (`queue` lub `candidate`), identyfikator znaku, identyfikator drogi OSM, odpowiedź tier 1, odpowiedź tier 2, wartość ludzka (pusta), wynik, werdykt (pusty), komentarz (pusty).
 
 ---
 
-## 10. User Flow Diagram
+## 10. Diagram przepływu
 
 ```mermaid
 flowchart TD
-    A[User or agent runs CLI] --> S[Resolve source per dataset: option, env var, config, default local]
+    A[Użytkownik lub agent uruchamia CLI] --> S[Ustal źródło każdego zbioru: opcja, zmienna, konfiguracja, domyślnie lokalne]
     S --> D0{Dry run?}
-    D0 -- Yes --> D1[Print sources and max calls, exit 0]
-    D0 -- No --> R{Datasets readable, columns present?}
-    R -- No --> R1[Print dataset and error, exit non-zero, no report]
-    R -- Yes --> V{Review CSV valid?}
-    V -- No --> V1[Print row and value, exit non-zero]
-    V -- Yes --> L[For each of 119 signs]
-    L --> H{Human value entered?}
-    H -- Yes --> VAL[Value, tier=human]
-    H -- No --> C{Cached answer?}
-    C -- Yes --> VAL2[Cached value]
-    C -- No --> M{Model mode}
-    M -- off/cache --> Q[Manual queue: pending_human]
-    M -- live --> T1[Tier 1 decision model]
-    T1 --> T1a{Value or none, p >= 0.80?}
-    T1a -- Yes --> VAL3[Value, tier=decision_model]
-    T1a -- "No / unreadable / error" --> T2[Tier 2 LLM, medium reasoning]
-    T2 --> T2a{Value or none?}
-    T2a -- Yes --> VAL4[Value, tier=llm]
-    T2a -- "No / unreadable / error" --> Q
-    VAL --> K{Link trusted and road in Kraków OSM?}
+    D0 -- Tak --> D1[Wypisz źródła i maks. liczbę wywołań, kod 0]
+    D0 -- Nie --> R{Zbiory czytelne, kolumny obecne?}
+    R -- Nie --> R1[Wypisz zbiór i błąd, kod niezerowy, bez raportu]
+    R -- Tak --> V{CSV przeglądu poprawny?}
+    V -- Nie --> V1[Wypisz wiersz i wartość, kod niezerowy]
+    V -- Tak --> L[Dla każdego ze 119 znaków]
+    L --> H{Wartość ludzka wpisana?}
+    H -- Tak --> VAL[Wartość, tier=human]
+    H -- Nie --> C{Odpowiedź w cache?}
+    C -- Tak --> VAL2[Wartość z cache]
+    C -- Nie --> M{Tryb modeli}
+    M -- off/cache --> Q[Kolejka ręczna: pending_human]
+    M -- live --> T1[Tier 1: model decyzyjny]
+    T1 --> T1a{Wartość lub none, p >= 0,80?}
+    T1a -- Tak --> VAL3[Wartość, tier=decision_model]
+    T1a -- "Nie / unreadable / błąd" --> T2[Tier 2: LLM, średnie rozumowanie]
+    T2 --> T2a{Wartość lub none?}
+    T2a -- Tak --> VAL4[Wartość, tier=llm]
+    T2a -- "Nie / unreadable / błąd" --> Q
+    VAL --> K{Połączenie zaufane i droga w OSM Krakowa?}
     VAL2 --> K
     VAL3 --> K
     VAL4 --> K
-    K -- No --> AB[abstain]
-    K -- Yes --> CMP[Compare with OSM speed tags]
+    K -- Nie --> AB[abstain]
+    K -- Tak --> CMP[Porównanie z tagami prędkości OSM]
     CMP --> O[match / mismatch / map_missing / not_comparable]
-    O --> W[Write Markdown, results CSV, review CSV, evaluation]
+    O --> W[Zapis: Markdown, CSV wyników, CSV przeglądu, ewaluacja]
     AB --> W
     Q --> W
-    W --> RV[Analyst enters values and verdicts]
+    W --> RV[Analityk wpisuje wartości i werdykty]
     RV --> A
 ```
 
 ---
 
-## 11. Agent / System Behavior Specification
+## 11. Zachowanie systemu i modeli
 
-### Question
+### Pytanie
 
-One question per crop, in English, neutral, with the closed answer set:
+Jedno pytanie na wycinek, po angielsku, neutralne, z zamkniętym zbiorem odpowiedzi:
 
-- a speed value in km/h from a round prohibition sign with a red border (B-33), one of 5–140 in steps of 5 or 10;
-- `none` — the crop does not show a B-33 speed-limit sign (zone sign, zone end, end of limit, other sign, not a sign);
-- `unreadable` — a B-33 sign is present but its value cannot be read.
+- wartość prędkości w km/h z okrągłego znaku zakazu z czerwonym obrzeżem (B-33), jedna z 5–140 co 5 lub co 10;
+- `none` — wycinek nie pokazuje znaku B-33 (znak strefy, koniec strefy, koniec ograniczenia, inny znak, brak znaku);
+- `unreadable` — znak B-33 jest widoczny, ale jego wartości nie da się odczytać.
 
-### Tiers
+### Tiery
 
-| Tier | Who | Accepts | Escalates |
+| Tier | Kto | Przyjmuje | Eskaluje |
 |---|---|---|---|
-| 1 | Decision model | Value or `none` with p ≥ 0.80 | p < 0.80, `unreadable`, `model_unavailable` |
-| 2 | General-purpose multimodal LLM, medium reasoning | Value or `none` | `unreadable`, out-of-set answer, `model_unavailable` |
-| 3 | Analyst | Value entered in the review CSV | — (until then `pending_human`) |
+| 1 | Model decyzyjny | Wartość lub `none` z p ≥ 0,80 | p < 0,80, `unreadable`, `model_unavailable` |
+| 2 | Zwykły multimodalny LLM, średnie rozumowanie | Wartość lub `none` | `unreadable`, odpowiedź spoza zbioru, `model_unavailable` |
+| 3 | Analityk | Wartość wpisana w CSV przeglądu | — (do tego czasu `pending_human`) |
 
-### Outcomes
+### Wyniki
 
-| Outcome | Meaning |
+| Wynik | Znaczenie |
 |---|---|
-| `match` | Sign value equals the single numeric OSM `maxspeed`. |
-| `mismatch` | Sign value and single numeric OSM `maxspeed` differ. Candidate. |
-| `map_missing` | Sign value numeric; road has no OSM speed tag. Candidate. |
-| `not_comparable` | Sign `none`, non-numeric OSM speed, or directional/conditional speed tags. |
-| `abstain` | Sign-to-road link not trusted, road not in the dataset, or sign outside Kraków. |
-| `pending_human` | No value accepted yet; in the manual queue. |
+| `match` | Wartość znaku równa jedynemu liczbowemu OSM `maxspeed`. |
+| `mismatch` | Wartość znaku różna od jedynego liczbowego OSM `maxspeed`. Kandydat. |
+| `map_missing` | Wartość znaku liczbowa; droga nie ma tagu prędkości OSM. Kandydat. |
+| `not_comparable` | Znak `none`, prędkość OSM niebędąca liczbą w km/h albo kierunkowe/warunkowe tagi prędkości. |
+| `abstain` | Połączenie znak–droga niezaufane, drogi nie ma w zbiorze albo znak poza Krakowem. |
+| `pending_human` | Brak przyjętej wartości; znak w kolejce ręcznej. |
 
-`unreadable` is a model's answer; `model_unavailable` is a call failure. Neither is converted into a value or into `none`.
+`unreadable` to odpowiedź modelu; `model_unavailable` to błąd wywołania. Żadne z nich nie jest zamieniane na wartość ani na `none`.
 
-### Not allowed
+### Zabronione
 
-- Declaring a map error: only the analyst's `confirmed` verdict marks a problem.
-- Sending map values, labels, detector values, file names or the other tier's answer to a model.
-- Retrying a call automatically or exceeding a tier's limits.
-- Treating the camera position as the sign position, or the nearest road as proof that the sign applies to it.
-- Modifying input files or overwriting values entered by the analyst.
+- Stwierdzanie błędu mapy: problem oznacza wyłącznie werdykt analityka `confirmed`.
+- Wysyłanie do modelu wartości mapy, etykiet, wartości detektora, nazw plików albo odpowiedzi innego tieru.
+- Automatyczne ponawianie wywołań albo przekraczanie limitów tieru.
+- Traktowanie pozycji aparatu jako pozycji znaku albo najbliższej drogi jako dowodu, że znak jej dotyczy.
+- Zmiana plików wejściowych albo nadpisywanie wartości wpisanych przez analityka.
 
 ---
 
-## 12. MVP Validation and Model Evaluation Plan
+## 12. Plan walidacji MVP i ewaluacji modeli
 
-### Why speed-limit signs only
+### Dlaczego tylko znaki ograniczenia prędkości
 
-| Question | Labels available | Usable for MVP |
+| Pytanie | Dostępne etykiety | Nadaje się do MVP |
 |---|---|---|
-| Speed-limit sign value (sign crops) | 119 crops: 89 numeric values (20–120 km/h, 6–9 per value), 29 negatives, 1 unreadable; 4 uncertain | Yes — balanced values and real negatives |
-| Surface | 100 photos: 99 `paved`, 1 `unknown`, 0 `unpaved` | No — cannot measure error on unpaved |
-| Junction, lighting | 100 photos | No map comparison defined yet |
+| Wartość znaku ograniczenia (wycinki) | 119 wycinków: 89 wartości liczbowych (20–120 km/h, 6–9 na wartość), 29 negatywnych, 1 nieczytelny; 4 uncertain | Tak — zrównoważone wartości i prawdziwe przypadki negatywne |
+| Nawierzchnia | 100 zdjęć: 99 `paved`, 1 `unknown`, 0 `unpaved` | Nie — nie da się zmierzyć błędu dla nawierzchni nieutwardzonej |
+| Skrzyżowanie, oświetlenie | 100 zdjęć | Brak zdefiniowanego porównania z mapą |
 
-### Stages
+### Etapy
 
-| Stage | Mode | Signs | Paid calls | Proves |
+| Etap | Tryb | Znaki | Płatne wywołania | Co sprawdza |
 |---|---|---|---|---|
-| 0. Workflow | `off`, local files; then `off` with OSM roads from Databricks | all 119 | 0 | Reading, linking, comparison, outputs, review round-trip, source switching (AC-39) |
-| 1. Smoke | `live` | 5 fixed: 3 numeric with different values, 1 zone sign, 1 cancelled speed sign | ≤ 5 tier 1, ≤ 5 tier 2 | Real request and response shape, cache, cost logging, failure handling |
-| 2. Evaluation | `live` | 20 more, stratified: 13 numeric covering every value not yet covered at least once; 6 negatives: the other cancelled sign, the false-positive object with a speed class, zone end, no-entry, weight limit, no speed sign; 1 unreadable sign; at most one sign per sequence; uncertain labels excluded | ≤ 20 tier 1, remaining tier-2 budget | Model quality per tier vs the detector baseline |
-| 3. Re-run | `cache` | same 25 | 0 | AC-03 reproducibility; threshold exploration (AC-36) |
+| 0. Przepływ | `off`, pliki lokalne; potem `off` z drogami OSM z Databricks | wszystkie 119 | 0 | Odczyt, połączenia, porównanie, wyniki, runda przeglądu, zmiana źródła (AC-39) |
+| 1. Smoke | `live` | 5 stałych: 3 liczbowe o różnych wartościach, 1 znak strefy, 1 przekreślony znak ograniczenia | ≤ 5 tier 1, ≤ 5 tier 2 | Prawdziwy kształt żądań i odpowiedzi, cache, zapis kosztu, obsługa błędów |
+| 2. Ewaluacja | `live` | 20 kolejnych, warstwowo: 13 liczbowych, każda wartość jeszcze nieobecna co najmniej raz; 6 negatywnych: drugi przekreślony znak, fałszywie wykryty obiekt z klasą prędkości, koniec strefy, zakaz wjazdu, ograniczenie masy, brak znaku prędkości; 1 znak nieczytelny; najwyżej jeden znak na sekwencję; bez etykiet uncertain | ≤ 20 tier 1, reszta budżetu tier 2 | Jakość modeli na tier wobec punktu odniesienia detektora |
+| 3. Powtórka | `cache` | te same 25 | 0 | Powtarzalność AC-03; eksploracja progów (AC-36) |
 
-The 94 remaining signs are held back for later phases, so that a future threshold change can be checked on unseen signs.
+Pozostałe 94 znaki są odłożone na kolejne fazy, aby przyszłą zmianę progu sprawdzić na niewidzianych znakach.
 
-### What we expect and the MVP targets
+### Czego oczekujemy i cele MVP
 
-The Mapillary detector baseline (AC-35) is strong on this set: it matches all 89 numeric labels and maps 26 of the 30 other crops to `none`. It fails on 4 crops: 2 cancelled speed signs, 1 false-positive object and 1 unreadable sign, all with a speed-limit class. The sample therefore contains all 4 of these hard cases.
+Punkt odniesienia z detektora Mapillary (AC-35) jest na tym zestawie mocny: zgadza się ze wszystkimi 89 etykietami liczbowymi i daje `none` dla 26 z 30 pozostałych wycinków. Myli się w 4 przypadkach: 2 przekreślonych znakach, 1 fałszywie wykrytym obiekcie i 1 nieczytelnym znaku, wszystkie z klasą ograniczenia prędkości. Próbka zawiera więc wszystkie 4 trudne przypadki.
 
-Consequences for the MVP:
+Konsekwencje dla MVP:
 
-- On the sign crops the chain can at best remove the detector's 4 errors; it cannot show a large gain. The MVP evaluation proves that the chain is **not worse** than the detector and that escalation and the manual queue work.
-- The real value of the chain is on photos **without** detections (all 461 Panoramax photos), where there is no baseline. This is the reason to build it, and the target of phase 2.
+- Na wycinkach kaskada może co najwyżej usunąć 4 błędy detektora; nie pokaże dużego zysku. Ewaluacja MVP sprawdza, że kaskada **nie jest gorsza** od detektora i że eskalacja oraz kolejka ręczna działają.
+- Prawdziwa wartość kaskady jest na zdjęciach **bez** detekcji (wszystkie 461 zdjęć Panoramax), gdzie nie ma punktu odniesienia. To powód jej budowy i cel fazy 2.
 
-Targets, fixed before stage 1:
+Cele ustalone przed etapem 1:
 
-- False acceptances in the chain (accepted answer ≠ label): at most 1 of the 24 evaluated signs with a certain, readable label.
-- Hard cases (2 cancelled signs, 1 false-positive object): at least 2 of 3 answered `none` or escalated, not accepted as a speed value.
-- The unreadable sign is escalated to the manual queue, not accepted as a value.
-- Manual queue: at most 10 of 25 signs (40%).
-- Every paid request, failure and cost is in the log; the stage-3 re-run makes zero calls.
+- Fałszywe przyjęcia w kaskadzie (przyjęta odpowiedź ≠ etykieta): najwyżej 1 na 24 ocenianych znaki z pewną, czytelną etykietą.
+- Trudne przypadki (2 przekreślone znaki, 1 fałszywy obiekt): co najmniej 2 z 3 z odpowiedzią `none` albo eskalowane, a nie przyjęte jako wartość prędkości.
+- Znak nieczytelny trafia do kolejki ręcznej, a nie zostaje przyjęty jako wartość.
+- Kolejka ręczna: najwyżej 10 z 25 znaków (40%).
+- Każde płatne żądanie, błąd i koszt są w logu; powtórka w etapie 3 wykonuje zero wywołań.
 
-With 25 signs these are go/no-go signals for the workflow, not accuracy estimates. A target miss is reported, not hidden, and leads to a change in the question, threshold or model in a new evaluation on held-back signs.
+Przy 25 znakach to sygnały „dalej / stop” dla przepływu, a nie oszacowanie trafności. Niespełniony cel jest raportowany, a nie ukrywany, i prowadzi do zmiany pytania, progu albo modelu w nowej ewaluacji na znakach odłożonych.
 
-### Expected map outcomes for Kraków (from the labels, before any model run)
+### Oczekiwane wyniki porównania dla Krakowa (z etykiet, przed uruchomieniem modeli)
 
-Of the 99 Kraków signs, 74 have a numeric label. With a trusted link and the road found in the OSM roads file, the comparison rules in AC-20 to AC-23 give: 13 `match`, 18 `mismatch`, 7 `map_missing`, 7 `not_comparable` (directional or conditional speed tags). The high share of mismatches is expected to come mainly from signs assigned to the wrong nearby road. This is why every candidate needs the analyst's verdict.
-
----
-
-## 13. Later Phases
-
-- **Phase 2:** HTML report with thumbnails or a simple review UI; Overture speed rules including `when`/`between`; missing-attribute statistics for all roads; the 561 street photos and their road links; surface check after labelling an unpaved sample.
-- **Phase 3:** more photo questions (junction, lighting, lanes); signs from full photos; `traffic_signs.geojson`; escalation on tier disagreement; other data sources.
+Z 99 znaków w Krakowie 74 ma etykietę liczbową. Przy zaufanym połączeniu i drodze obecnej w pliku dróg OSM reguły AC-20 do AC-23 dają: 13 `match`, 18 `mismatch`, 7 `map_missing`, 7 `not_comparable` (kierunkowe lub warunkowe tagi prędkości). Wysoki udział `mismatch` wynika prawdopodobnie głównie z przypisania znaków do niewłaściwej, pobliskiej drogi. Dlatego każdy kandydat wymaga werdyktu analityka.
 
 ---
 
-## 14. Further Notes
+## 13. Kolejne fazy
 
-- **Confidence threshold 0.80:** a starting value fixed before measurement. It must not be tuned on the evaluated signs and then reported as accuracy; threshold exploration in stage 3 is labelled exploratory and checked later on held-back signs.
-- **Tier-2 confidence:** a general-purpose LLM does not return calibrated probabilities; its in-set answer is accepted in the MVP.
-- **Signs outside Kraków (20):** used for model evaluation only; the OSM roads dataset covers Kraków.
-- **Sign-to-road distance:** median 3.4 m, maximum 103 m. The link flags in `signs/nearest_osm.csv` are used as given.
-- **Transport to Databricks:** REST API or CLI is decided in the ADR. Managed MCP returns HTTP 403 for the shared `sql`-scoped token.
-- **Open question:** whether the Databricks volume `/Volumes/workspace/map_qa/inputs/` contains the sign set and should become its source in a later phase.
+- **Faza 2:** raport HTML z miniaturami albo prosty interfejs przeglądu; reguły prędkości Overture z `when`/`between`; statystyki brakujących atrybutów dla wszystkich dróg; 561 zdjęć ulicznych i ich połączenia z drogami; kontrola nawierzchni po oznaczeniu próbki nieutwardzonej.
+- **Faza 3:** kolejne pytania o zdjęcia (skrzyżowania, oświetlenie, pasy); znaki z pełnych zdjęć; `traffic_signs.geojson`; eskalacja przy niezgodności tierów; inne źródła danych.
+
+---
+
+## 14. Dodatkowe uwagi
+
+- **Próg pewności 0,80:** wartość startowa ustalona przed pomiarem. Nie wolno jej dostrajać na ocenianych znakach i raportować wyniku jako trafności; eksploracja progów w etapie 3 jest oznaczona jako eksploracyjna i sprawdzana później na znakach odłożonych.
+- **Pewność tier 2:** zwykły LLM nie zwraca skalibrowanych prawdopodobieństw; w MVP jego odpowiedź ze zbioru jest przyjmowana.
+- **Znaki spoza Krakowa (20):** tylko do ewaluacji modeli; zbiór dróg OSM obejmuje Kraków.
+- **Dystans znak–droga:** mediana 3,4 m, maksimum 103 m. Flagi połączeń z `signs/nearest_osm.csv` są używane bez zmian.
+- **Dostęp do Databricks:** wybór między REST API a CLI należy do ADR. Managed MCP zwraca HTTP 403 dla wspólnego tokenu z zakresem `sql`.
+- **Pytanie otwarte:** czy volume Databricks `/Volumes/workspace/map_qa/inputs/` zawiera zestaw znaków i czy w kolejnej fazie ma być jego źródłem.
