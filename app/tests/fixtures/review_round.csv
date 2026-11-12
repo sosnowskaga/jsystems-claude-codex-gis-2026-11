@@ -1,0 +1,12 @@
+photo_id,human_value,expected_outcome,expected_reason,osm_basis
+mapillary_1029602998981114,50,match,,maxspeed=50
+mapillary_1035052394661534,70,mismatch,,maxspeed=60
+mapillary_224324516912032,30,map_missing,,no speed tag and no implicit tag
+mapillary_1032959014995687,60,not_comparable,implicit_limit,only maxspeed:type=PL:rural
+mapillary_183021920263074,80,not_comparable,implicit_limit,only source:maxspeed=PL:expressway
+mapillary_1237130608489136,50,not_comparable,directional_or_conditional_tag,maxspeed:forward=50 maxspeed:backward=70
+mapillary_1152877773579493,140,not_comparable,directional_or_conditional_tag,maxspeed=140 maxspeed:conditional=110 @ (Mo-Fr 06:00-18:00)
+mapillary_1022418992130552,none,not_comparable,sign_none,maxspeed=30
+mapillary_1114562969067116,unreadable,not_comparable,sign_unreadable,maxspeed=70
+mapillary_1109576507471869,50,abstain,flag:ambiguous_candidates,Kraków with match_flags=ambiguous_candidates
+mapillary_1071696194278486,50,abstain,outside_krakow;road_not_in_osm,Warszawa and way not in osm_roads
