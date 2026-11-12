@@ -26,4 +26,5 @@ app/.cache/
 
 # Map QA run outputs (review.csv is not versioned, ADR-000 §3)
 reports/map-qa/run/
+reports/map-qa/run-*/
 .tmp/

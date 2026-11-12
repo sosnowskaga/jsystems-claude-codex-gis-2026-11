@@ -27,6 +27,7 @@ from map_qa.models import (
     TierConfig,
 )
 from map_qa.review import human_values, machine_rows, merge, read_review, verdicts, write_review
+from map_qa.sources.databricks import DatabricksRoadsSource
 from map_qa.sources.local import LocalRoadsSource
 
 # Fixed per-call cost reservations in USD (ADR-001 §5).
@@ -146,14 +147,23 @@ def check_live_prerequisites(settings: Settings, options: RunOptions) -> None:
     raise MapQaError("model mode 'live' is not implemented in this build")
 
 
-def roads_source_for(settings: Settings):
+def roads_source_for(settings: Settings, env: dict[str, str]):
     src = settings.sources["osm_roads"]
     if src.kind == "local":
         path = Path(src.location)
         if not path.is_absolute():
             path = settings.data_dir / path
         return LocalRoadsSource(path, chosen_by=src.chosen_by, location=src.location)
-    raise MapQaError("osm_roads: source 'databricks' is not implemented in this build")
+    db = settings.databricks
+    return DatabricksRoadsSource(
+        table=src.location,
+        env=env,
+        host_env=db.host_env,
+        token_env=db.token_env,
+        warehouse_env=db.warehouse_env,
+        warehouse_id=db.warehouse_id,
+        chosen_by=src.chosen_by,
+    )
 
 
 def execute(
@@ -163,7 +173,7 @@ def execute(
 ) -> RunSummary:
     check_live_prerequisites(settings, options)
     chosen_by = {name: s.chosen_by for name, s in settings.sources.items()}
-    bundle = load_inputs(settings.data_dir, roads_source_for(settings), chosen_by)
+    bundle = load_inputs(settings.data_dir, roads_source_for(settings, options.env), chosen_by)
 
     sample = resolve_sample(options.sample, {s.photo_id for s in bundle.signs})
     signs = bundle.signs if sample is None else [s for s in bundle.signs if s.photo_id in set(sample)]
