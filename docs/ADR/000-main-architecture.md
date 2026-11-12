@@ -73,7 +73,7 @@ Inputs in `course-materials/exercise-data/map-qa/` are read-only. The tool write
 | Reading and joins | DuckDB 1.5.6 | CSV and Parquet with one engine, SQL compatible with Databricks; version verified by the exercise scripts. DuckDB 2.0.0 (2026-10-21) is a new major release, untested with this data |
 | Arrow | pyarrow 23.0.1 | Version verified in the exercise |
 | HTTP | httpx 0.28.1 | One client: OpenRouter and Databricks REST; explicit timeout, zero retries |
-| Models | `typesafe/jev-1.14` (tier 1), `openai/gpt-6-luna` (tier 2) | ADR-001; comparison with `openai/gpt-6-luna-decisions` is outside the MVP |
+| Models | `typesafe/jev-1.14` (tier 1), `openai/gpt-6-luna` (tier 2), `openai/gpt-6-luna-decisions` (tier-1 comparison, stage 2b), all through the OpenRouter API | ADR-001 |
 | Report | Markdown from the standard library | No new dependency; HTML in phase 2 |
 | Tests | pytest 9.2.0 | Project standard |
 | Hash | `hashlib` | Image sent byte for byte; Pillow not needed |
@@ -133,7 +133,7 @@ No file contains a base64 image or a secret value.
 | `map-qa evaluate` | Evaluation section from labels | 0 |
 | input, source, `review.csv` errors | One line naming the dataset, file, column, variable or row | 2 |
 
-Options: `--source`, `--source-<dataset>`, `--config`, `--out`, `--model-mode`, `--sample`, `--threshold`, `--max-requests-tier1/2`, `--max-cost-tier1/2`, `--review`, `--yes`, `--dry-run`. The names are fixed by a CLI contract test before implementation.
+Options: `--source`, `--source-<dataset>`, `--config`, `--out`, `--model-mode`, `--sample`, `--threshold`, `--max-requests-tier1/2`, `--max-cost-tier1/2`, `--tier1-model`, `--experiment-id`, `--review`, `--yes`, `--dry-run`. The names are fixed by a CLI contract test before implementation.
 
 Per PRD §4.7, a model error does not stop the run: the tier is skipped as `model_unavailable`, and the sign continues down the cascade.
 

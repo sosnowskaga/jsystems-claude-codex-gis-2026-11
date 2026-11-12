@@ -69,9 +69,9 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 - E2E: `osm_roads` from Databricks = local result (TAC-002-01).
 
 ### 10. `live` mode and stages 1–3 of PRD §12 (needs B4)
-- `decisions_client`, `llm_client` (httpx, 40 s, no retries), cost reservation, error mapping, confirmation before the first paid call.
+- `decisions_client` (model-agnostic: Jev 1.14 and Luna Decisions), `llm_client` (GPT-6 Luna); all through the OpenRouter API (httpx, 40 s, no retries), cost reservation, error mapping, confirmation before the first paid call.
 - The first request to each model → capture; parser mocks only from captures.
-- Stage 1 (5 signs), stage 2 (20), stage 3 (`cache`, zero calls) and the "met / not met" target report.
+- Stage 1 (5 signs), stage 2 (20), stage 2b (Luna Decisions as tier 1 on the same 25, AC-45), stage 3 (`cache`, zero calls) and the "met / not met" target report.
 
 ---
 

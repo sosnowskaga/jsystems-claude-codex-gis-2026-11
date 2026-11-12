@@ -29,7 +29,7 @@ Choice of models and client, question contract, acceptance and escalation rules,
 | Role | Model | Input | Price per 1M tokens (2026-11-03) |
 |---|---|---|---|
 | Tier 1 | `typesafe/jev-1.14` | text, image; context 262 144 | input 0.042 USD, output 0 |
-| Comparison (Proposed, outside MVP) | `openai/gpt-6-luna-decisions` | text, image; context 1 050 000 | input 0.10 USD, output 0 |
+| Tier 1 alternative (comparison, stage 2b) | `openai/gpt-6-luna-decisions` | text, image; context 1 050 000 | input 0.10 USD, output 0 |
 | Tier 2 | `openai/gpt-6-luna` | text, image; reasoning, structured outputs | input 0.10 USD, output 0.50 USD |
 
 The identifiers are in the configuration. Changing a model changes the cache key.
@@ -129,15 +129,22 @@ The MVP calls no other paid models. `--dry-run` (AC-44) shows at most 25 + 10 ca
 **Consequences:** (+) no hidden retries, 1:1 capture; (−) custom parsing and error mapping.
 **Review trigger:** the Decisions API leaves alpha.
 
-### Jev 1.14 as tier 1; comparison with Luna Decisions outside the MVP
-**Status:** Accepted (Jev); Proposed (comparison)
-**Context:** Both models accept images and return a distribution; Jev is about 2.4 times cheaper per input token. The PRD §8 limits cover only tier 1 and tier 2.
-**Decision:** Jev in the cascade. A comparison with Luna Decisions on the same 5 stage 1 crops is possible only after a separate limit (5 calls) and a budget allocation are added to the PRD. Until then the code does not call this model.
+### Jev 1.14 as tier 1; Luna Decisions compared in the MVP
+**Status:** Accepted (updated 2026-11-12: budget granted, comparison moved into the MVP)
+**Context:** Both models accept images and return a distribution over a closed answer set, through the same OpenRouter Decisions endpoint. Jev is about 2.4 times cheaper per input token. The user wants them compared on price, latency, question types and image handling. Both are cheap (all tests together < 1 USD, PRD §8).
+**Decision:**
+- Jev stays tier 1 of the cascade by default.
+- Luna Decisions runs as an alternative tier 1 in stage 2b (PRD §12): `map-qa run --model-mode live --sample stage1,stage2 --tier1-model openai/gpt-6-luna-decisions --max-requests-tier2 0 --experiment-id luna-decisions`. It uses the same crops, question, `question_version` and threshold, its own ledger and its own cache entries (the model is part of the cache key).
+- The decisions client is model-agnostic: the model ID is a parameter, so no second client exists.
+- `evaluate` reads both experiments and builds the AC-45 table. Latency is measured per request (`latency_ms` in StageAnswer).
+- Before the comparison, each model gets its own capture (§5). The Luna Decisions request is not assumed to accept the same question type and image form as Jev. Any difference becomes visible in the captures, is handled in the client, and is listed in the report.
+
 **Rejected:**
-- Luna Decisions as tier 1: more expensive with no measured advantage.
-- Comparison within the tier 1 limit: it would use 5 of the 25 calls that PRD §12 already splits between stages 1 and 2.
-**Consequences:** (+) cost consistent with the PRD; (−) the choice of Jev is not based on a quality measurement.
-**Review trigger:** the PRD gets a comparison limit, or Jev does not meet the goals from PRD §12.
+- Luna Decisions as the default tier 1: more expensive, with no measured advantage yet. Revisit after AC-45.
+- Running both models in one experiment: it would mix ledgers and limits, and blur the per-model metrics.
+
+**Consequences:** (+) the tier-1 choice is backed by a measurement on identical inputs; (−) 25 extra requests, and the comparison covers tier 1 only.
+**Review trigger:** AC-45 shows Luna Decisions clearly better on false acceptances or negatives at an acceptable cost.
 
 ### GPT-6 Luna as tier 2
 **Status:** Accepted
@@ -249,7 +256,7 @@ sequenceDiagram
 | Cache and resume | integration | live run (mock from capture), then cache | second run: 0 requests, same results (AC-03) | threshold change: recomputation without requests |
 | Service error | integration | 429, timeout | `model_unavailable`, sign moves on, transport counts 1 request | error in both tiers → queue |
 
-E2E `live` only after the budget is granted. The capture of each model is the **first stage-1 request** of that model, not an extra request. Then stage 1 continues (5 signs in total, Jev + tier 2), followed by stage 2, and stage 3 in `cache` mode. Tier-1 requests therefore stay at 5 + 20 = 25.
+E2E `live` only after the budget is granted. The capture of each model is the **first stage-1 request** of that model, not an extra request. Then stage 1 continues (5 signs in total, Jev + tier 2), followed by stage 2, and stage 3 in `cache` mode. Tier-1 requests therefore stay at 5 + 20 = 25. Stage 2b runs Luna Decisions as tier 1 on the same 25 signs in its own experiment, with its own capture as the first request (≤ 25 requests, tier 2 disabled).
 
 ### Technical acceptance criteria
 

@@ -163,6 +163,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 - **AC-34:** Labels with status `uncertain` and the label `unreadable` are excluded from accuracy denominators and listed separately with their count.
 - **AC-35:** The evaluation shows the Mapillary detector as a zero-cost baseline with the same metrics: a class `maximum-speed-limit-N` (not `end-of-…`) maps to value N; every other class or an empty class maps to `none`.
 - **AC-36:** The evaluation can recompute tier-1 acceptance at other thresholds from stored probabilities without new calls, and labels this as exploratory.
+- **AC-45:** The evaluation shows a side-by-side table of the decision models run as tier 1 on the same signs: `typesafe/jev-1.14` and `openai/gpt-6-luna-decisions`. Each model is run in its own experiment, with the same question, image and threshold. For each model the table gives, with denominators: answered, accepted at the threshold, accuracy of accepted answers, false acceptances, negatives answered `none` or escalated, `unreadable`, failures; median and maximum latency; cost and cost per accepted answer. It also lists any difference in how the two models accepted the request (question type, image input), as seen in the captures.
 
 ### Data sources
 
@@ -206,7 +207,8 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 ### Functional
 
 - Sign set: 119 sign photos with crops from 103 sequences; 99 in Kraków, 20 in other Polish cities.
-- Tier 1 is a decision model returning probabilities over a closed answer set. Tier 2 is a general-purpose multimodal LLM used at medium reasoning. Concrete models are chosen in the ADR.
+- Tier 1 is a decision model returning probabilities over a closed answer set. Tier 2 is a general-purpose multimodal LLM used at medium reasoning. Concrete models are chosen in the ADR. All models are called through the OpenRouter API, authenticated with `OPENROUTER_API_KEY` from the environment (set at user level; no key in any file).
+- Two decision models are compared on the same crops: `typesafe/jev-1.14` (the cascade's tier 1) and `openai/gpt-6-luna-decisions`. Both are multimodal and take the crop as image input. The comparison covers price, latency, accuracy, and handling of question types and images (stage 2b, AC-45).
 - MVP request limits: tier 1 at most 25 requests, tier 2 at most 10 requests, both including failures; lower if the trainer's allocation is lower. Timeout 40 s per request.
 - Report language: Polish for headings and labels; identifiers, tag keys and raw values unchanged.
 - Without network access, modes `off` and `cache` complete on local data.
@@ -232,7 +234,7 @@ The MVP has no graphical interface.
 
 ### 9.1 Command line
 
-- Options: data source (all datasets or per dataset), configuration file, output directory, model mode (`off`, `cache`, `live`), sample (list of sign ids or a file), confidence threshold, per-tier request and cost limits, review CSV path, confirmation, dry-run.
+- Options: data source (all datasets or per dataset), configuration file, output directory, model mode (`off`, `cache`, `live`), sample (list of sign ids or a file), confidence threshold, per-tier request and cost limits, tier-1 model (for the comparison), experiment id, review CSV path, confirmation, dry-run.
 - An example configuration file lists every dataset with a local and a Databricks location and only the names of credential variables.
 - On success: output paths, an outcome table and a tier table (sent, accepted, escalated, failed, cache hits, requests, cost).
 - On failure: one error line naming the dataset, file, column, variable or review row; non-zero exit code.
@@ -353,6 +355,7 @@ One question per crop, in English, neutral, with the closed answer set:
 | 0. Workflow | `off`, local files; then `off` with OSM roads from Databricks | all 119 | 0 | Reading, linking, comparison, outputs, review round-trip, source switching (AC-39) |
 | 1. Smoke | `live` | 5 fixed: 3 numeric with different values, 1 zone sign, 1 cancelled speed sign | ≤ 5 tier 1, ≤ 5 tier 2 | Real request and response shape, cache, cost logging, failure handling |
 | 2. Evaluation | `live` | 20 more, stratified: 13 numeric covering every value not yet covered at least once; 6 negatives: the other cancelled sign, the false-positive object with a speed class, zone end, no-entry, weight limit, no speed sign; 1 unreadable sign; at most one sign per sequence; uncertain labels excluded | ≤ 20 tier 1, remaining tier-2 budget | Model quality per tier vs the detector baseline |
+| 2b. Decision-model comparison | `live`, tier 1 = `openai/gpt-6-luna-decisions`, tier 2 disabled, separate experiment | same 25 | ≤ 25 tier 1, 0 tier 2 | Jev vs Luna Decisions on identical crops and question: price, latency, accuracy, negatives (AC-45) |
 | 3. Re-run | `cache` | same 25 | 0 | AC-03 reproducibility; threshold exploration (AC-36) |
 
 The 94 remaining signs are held back for later phases, so that a future threshold change can be checked on unseen signs.
