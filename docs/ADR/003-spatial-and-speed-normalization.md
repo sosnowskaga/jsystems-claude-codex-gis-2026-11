@@ -40,7 +40,8 @@ Wartości `kind`:
 
 | `kind` | Przykład | `value_kmh` |
 |---|---|---|
-| `numeric` | `50`, `30 mph` | liczba w km/h; mph przeliczone, `unit_raw` zachowane |
+| `numeric` | `50`, `50 km/h` | liczba w km/h |
+| `numeric_other_unit` | `30 mph`, `20 knots` | puste; `unit_raw` zachowane; bez przeliczania, bo porównanie wymaga km/h (AC-20) |
 | `implicit` | `PL:urban`, `PL:rural`, `PL:motorway` | puste; bez zgadywania limitu ustawowego |
 | `special` | `none`, `signals`, `walk`, `variable` | puste |
 | `multi` | `50;70` | osobne reguły z flagą `multi_value` |
@@ -141,7 +142,7 @@ flowchart TD
 
 | Scenariusz | Typ | Wejście | Oczekiwany wynik | Przypadki brzegowe |
 |---|---|---|---|---|
-| Normalizacja `maxspeed` | unit | `50`, `30 mph`, `PL:urban`, `none`, `50;70`, `60 @ (22:00-06:00)`, pusty, `abc` | `kind` i `value_kmh` jak w §3, `raw` bez zmian | pusty ≠ 0 |
+| Normalizacja `maxspeed` | unit | `50`, `50 km/h`, `30 mph`, `PL:urban`, `none`, `50;70`, `60 @ (22:00-06:00)`, pusty, `abc` | `kind` i `value_kmh` jak w §3, `raw` bez zmian | pusty ≠ 0; `30 mph` + odczyt 50 → `not_comparable`, nie `mismatch` |
 | Porównanie | unit | odczyt 50 + `maxspeed=50`; + `maxspeed=40`; + brak tagów; + `:forward=50` | `match`; `mismatch`; `map_missing`; `not_comparable` | odczyt `none` |
 | Abstencja | integration | prawdziwe wiersze `nearest_osm.csv` z flagami | `abstain` z flagą jako przyczyną | droga nieobecna w lokalnym OSM (4 przypadki) |
 | Oczekiwane liczności (faza MVP, z PRD §12) | integration, tylko w ewaluacji | 74 liczbowe etykiety Krakowa jako odczyty | 13 `match`, 18 `mismatch`, 7 `map_missing`, 7 `not_comparable` | test w module `evaluate`, nie w ścieżce przebiegu |
