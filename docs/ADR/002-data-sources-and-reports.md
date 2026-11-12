@@ -39,16 +39,17 @@ Każdy adapter zwraca ten sam kontrakt: tabelę z nazwanymi, typowanymi kolumnam
 
 ### Wybór źródła (AC-37, AC-38)
 
-Kolejność pierwszeństwa: `--source-<dataset>` > `--source` > `MAPQA_SOURCE_<DATASET>` > `MAPQA_SOURCE` > plik konfiguracji > `local`. Plik konfiguracji podaje dla każdego zbioru ścieżkę lub `catalog.schema.table`, a dla Databricks tylko **nazwy** zmiennych hosta, tokenu i warehouse. Każde pole konfiguracji, którego wartość wygląda na sekret (prefiks `dapi`, `Bearer `, `sk-`, długi ciąg base64), powoduje odrzucenie pliku z nazwą pola, bez wypisania wartości (AC-40). Nie ma automatycznego zastępstwa przy awarii (PRD §4.7).
+Kolejność pierwszeństwa: `--source-<dataset>` > `--source` > `MAPQA_SOURCE_<DATASET>` > `MAPQA_SOURCE` > plik konfiguracji > `local`. Plik konfiguracji podaje dla każdego zbioru ścieżkę lub `catalog.schema.table`, a dla Databricks tylko **nazwy** zmiennych hosta, tokenu i warehouse. Walidacja sekretów (AC-40), bez heurystyk długości: pola z nazwami zmiennych mają sufiks `_env` (`host_env`, `token_env`, `warehouse_env`), a ich wartość musi pasować do wzorca `^[A-Z][A-Z0-9_]*$`. Plik jest odrzucany, jeśli zawiera pole o nazwie `token`, `api_key`, `secret` lub `password`, albo jeśli dowolna wartość tekstowa zaczyna się od `dapi`, `Bearer `, `sk-` lub `ctx7sk`. Komunikat podaje nazwę pola, bez wartości. Identyfikator warehouse i hashe są dozwolone. Nie ma automatycznego zastępstwa przy awarii (PRD §4.7).
 
 ### Kontrakt odczytu Databricks
 
 - Warehouse zawsze jawny. Nie wybieramy pierwszego dostępnego, jak robi `query_databricks.py`.
-- Zapytanie budowane z listy potrzebnych kolumn. Dla `osm_roads` to `osm_id`, `highway`, `tags` i kolumny `maxspeed*`, bez geometrii, z filtrem `osm_id IN (…)` przez nazwane parametry. Pobieramy tylko drogi wskazane w `nearest_osm`, więc wynik mieści się w INLINE.
+- Zapytanie budowane z listy potrzebnych kolumn. Dla `osm_roads` to `osm_id`, `highway`, `tags` i kolumny `maxspeed*`, bez geometrii. Filtr to `osm_id IN (:id_0, :id_1, …)`, po jednym nazwanym markerze na identyfikator, każdy z typem kolumny `osm_id` z `manifest.schema`. Parametry Statement Execution API są skalarami, więc listy nie da się związać jednym markerem. Paczka liczy maksymalnie 256 identyfikatorów; MVP potrzebuje jednej paczki (≤ 119 dróg). Wartości nigdy nie są wklejane do tekstu SQL. Pobieramy tylko drogi wskazane w `nearest_osm`, więc wynik mieści się w INLINE.
 - Nazwa tabeli z konfiguracji musi pasować do wzorca `catalog.schema.table` (tylko litery, cyfry, `_`).
 - Strażnik: tekst zapytania zaczyna się od `SELECT` i nie zawiera `;`. Każde wysłane zapytanie trafia do logu przebiegu (AC-41).
 - `wait_timeout = 10s`, `on_wait_timeout = CONTINUE`; potem polling po `statement_id` co 2 s do limitu 180 s. **Nigdy nie ponawiamy POST** w ramach przebiegu (PRD §4.7).
-- Sprawdzamy obecność wymaganych kolumn. Gdy liczba wierszy różni się od liczby w `sources.json`, wypisujemy ostrzeżenie z obiema wartościami i kontynuujemy (AC-43). Uwaga: przy filtrze po identyfikatorach porównujemy z liczbą żądanych identyfikatorów, nie z całym snapshotem.
+- Sprawdzamy obecność wymaganych kolumn.
+- AC-43 dla obu źródeł działa tak samo: liczba wierszy **całej tabeli** jest porównywana z liczbą w `sources.json`. Lokalnie to liczba wierszy pliku, w Databricks osobne zapytanie `SELECT count(*)`. Różnica daje ostrzeżenie z obiema wartościami, a przebieg trwa dalej. Osobno raportujemy identyfikatory z `nearest_osm`, których nie znaleziono w tabeli; dostają `abstain` (ADR-003).
 - Kategorie błędów: `missing_variable` (przed jakimkolwiek zapytaniem, AC-42), `auth` (401), `permission` (403), `query_failed` (FAILED, z `error_code`), `timeout`, `canceled`. Każdy błąd kończy przebieg kodem 2 przed wywołaniem modelu.
 
 ---
@@ -125,14 +126,16 @@ sequenceDiagram
     participant A as adapter databricks
     participant W as SQL warehouse
     A->>A: sprawdź DATABRICKS_HOST, _TOKEN, _SQL_WAREHOUSE_ID (obecność)
-    A->>W: POST SELECT osm_id, tags… WHERE osm_id IN (:ids) (wait 10s, CONTINUE)
+    A->>W: POST SELECT count(*) FROM osm_roads (porównanie z sources.json)
+    W-->>A: SUCCEEDED, liczba wierszy
+    A->>W: POST SELECT osm_id, tags… WHERE osm_id IN (:id_0, …, :id_n) (wait 10s, CONTINUE)
     W-->>A: PENDING, statement_id
     loop co 2 s, maks. 180 s
         A->>W: GET /statements/{id}
         W-->>A: RUNNING
     end
     W-->>A: SUCCEEDED, manifest, data_array
-    A-->>A: kolumny OK, liczba wierszy vs żądane ID
+    A-->>A: kolumny OK, brakujące ID → abstain
     Note over A,W: FAILED / CANCELED / timeout → kategoria błędu, kod 2, bez ponownego POST
 ```
 
@@ -143,7 +146,8 @@ sequenceDiagram
 | Scenariusz | Typ | Wejście | Oczekiwany wynik | Przypadki brzegowe |
 |---|---|---|---|---|
 | Pierwszeństwo źródeł | unit | sprzeczne opcja, zmienna, plik | wygrywa opcja; `chosen_by` poprawne | nic nie ustawione → `local` |
-| Sekret w konfiguracji | unit | pole z `dapi…` | odrzucenie z nazwą pola, wartość nie w komunikacie | długi ciąg base64 |
+| Sekret w konfiguracji | unit | pole `token`; wartość `dapi…`; `token_env` = `dapi…` | odrzucenie z nazwą pola, wartość nie w komunikacie | `warehouse_id = 97c455ee6fb1fcb9` i hash SHA-256 są akceptowane |
+| Parametry Databricks | unit | 95 identyfikatorów | 95 markerów `:id_n`, wartości tylko w `parameters`, nie w tekście SQL | 257 identyfikatorów → dwie paczki |
 | Strażnik SELECT | unit | `DELETE …`, `SELECT …; DROP …` | odrzucone przed wysłaniem | wielkość liter, komentarze SQL |
 | Polling | integration (mock z capture) | PENDING → RUNNING → SUCCEEDED | jeden POST, n GET | FAILED, timeout 180 s |
 | Brak zmiennej | unit | brak `DATABRICKS_TOKEN` | kod 2, nazwa zmiennej, zero żądań | pusty host |
