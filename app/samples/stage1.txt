@@ -1,0 +1,6 @@
+# stage1: selected by reports/map-qa/select_samples.py from signs/labels.csv (PRD §12)
+mapillary_1022418992130552
+mapillary_1029602998981114
+mapillary_1032959014995687
+mapillary_227382599193004
+mapillary_2311254286295539
