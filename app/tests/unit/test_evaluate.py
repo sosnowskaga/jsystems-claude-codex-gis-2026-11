@@ -129,3 +129,15 @@ def test_ac45_latency_includes_answers_replayed_from_cache(tmp_path):
     (out / "experiments" / "c.json").write_text(json.dumps(cached), encoding="utf-8")
     row = _row(evaluation_markdown(out, settings), "c")
     assert row[9] == "250" and row[10] == "250"
+
+
+def test_ac45_uses_labels_of_signs_outside_the_last_run(tmp_path):
+    """Review finding: a kept experiment is scored on its own signs, not on the last results.csv."""
+    out, settings = _fixture(tmp_path)
+    with (settings.data_dir / "signs" / "labels.csv").open("a", encoding="utf-8", newline="") as handle:
+        handle.write("e,70,certain,,,,\n")
+    old = {"experiment_id": "old", "threshold": 0.8, "tiers": {"tier1": {"model": "jev"}}, "answers": [
+        {"photo_id": "e", "tier": 1, "model": "jev", "status": "answered", "answer": "70", "probabilities": {"70": 0.9}, "latency_ms": 5}]}
+    (out / "experiments" / "old.json").write_text(json.dumps(old), encoding="utf-8")
+    row = _row(evaluation_markdown(out, settings), "old")
+    assert row[4] == "1/1" and row[5] == "0/1"

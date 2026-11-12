@@ -124,14 +124,19 @@ def evaluation_markdown(out_dir: Path, settings) -> str:
                 experiments.append((data.get("experiment_id", path.stem), data, exp_answers))
     for exp_id, exp, exp_answers in sorted(experiments, key=lambda x: x[0]):
         threshold = float(exp.get("threshold", 0.8))
+        # Label sets of this experiment's own signs (it may cover signs outside the last results.csv).
+        exp_ids = {a["photo_id"] for a in exp_answers}
+        e_measurable = {pid for pid in exp_ids if _measurable(labels.get(pid))}
+        e_numeric = {pid for pid in e_measurable if _numeric(labels[pid]["sign_value"])}
+        e_negatives = {pid for pid in e_measurable if labels[pid]["sign_value"] == "none"}
         accepted = {a["photo_id"]: a.get("answer") for a in exp_answers if a.get("status") == "answered" and a.get("answer") != "unreadable" and (a.get("probabilities") or {}) and float((a.get("probabilities") or {}).get(a.get("answer"), 0)) >= threshold}
-        correct, false, _ = _metric_counts(set(accepted), accepted, labels, measurable, numeric, negatives)
-        neg_sent = {a["photo_id"] for a in exp_answers if a["photo_id"] in negatives}
+        correct, false, _ = _metric_counts(set(accepted), accepted, labels, e_measurable, e_numeric, e_negatives)
+        neg_sent = {a["photo_id"] for a in exp_answers if a["photo_id"] in e_negatives}
         neg_handled = sum(a.get("answer") == "none" or a.get("status") != "answered" or a["photo_id"] not in accepted for a in exp_answers if a["photo_id"] in neg_sent)
         latencies = [a["latency_ms"] for a in exp_answers if isinstance(a.get("latency_ms"), (int, float))]
         costs = sum(a.get("cost_usd") or 0 for a in exp_answers)
         sent = len(exp_answers)
-        lines.append(f"| {exp_id} | {exp.get('tiers', {}).get('tier1', {}).get('model', exp_answers[0].get('model', ''))} | {sum(a.get('status') == 'answered' for a in exp_answers)}/{sent} | {len(accepted)}/{sent} | {_fraction(correct, sum(pid in numeric for pid in accepted))} | {false}/{sum(pid in measurable for pid in accepted)} | {neg_handled}/{len(neg_sent)} | {sum(a.get('answer') == 'unreadable' for a in exp_answers)}/{sent} | {sum(a.get('status') == 'model_unavailable' for a in exp_answers)}/{sent} | {statistics.median(latencies) if latencies else '—'} | {max(latencies) if latencies else '—'} | {costs:.6f} | {f'{costs/len(accepted):.6f} USD' if accepted else '—'} |")
+        lines.append(f"| {exp_id} | {exp.get('tiers', {}).get('tier1', {}).get('model', exp_answers[0].get('model', ''))} | {sum(a.get('status') == 'answered' for a in exp_answers)}/{sent} | {len(accepted)}/{sent} | {_fraction(correct, sum(pid in e_numeric for pid in accepted))} | {false}/{sum(pid in e_measurable for pid in accepted)} | {neg_handled}/{len(neg_sent)} | {sum(a.get('answer') == 'unreadable' for a in exp_answers)}/{sent} | {sum(a.get('status') == 'model_unavailable' for a in exp_answers)}/{sent} | {statistics.median(latencies) if latencies else '—'} | {max(latencies) if latencies else '—'} | {costs:.6f} | {f'{costs/len(accepted):.6f} USD' if accepted else '—'} |")
     if not experiments:
         lines.append("0 pozycji")
     lines += ["", *_REQUEST_DIFFERENCES, "", "### Kontrola logiki porównania (etykiety jako odczyty)", ""]
