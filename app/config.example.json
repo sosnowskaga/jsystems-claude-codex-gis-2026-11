@@ -1,0 +1,17 @@
+{
+  "data_dir": "../course-materials/exercise-data/map-qa",
+  "source": "local",
+  "model_mode": "off",
+  "datasets": {
+    "osm_roads": {"source": "local", "local": "osm_roads.parquet", "databricks": "workspace.map_qa.osm_roads"},
+    "signs": {"local": "signs/signs.csv"},
+    "nearest_osm": {"local": "signs/nearest_osm.csv"},
+    "crops": {"local": "signs/crops/"}
+  },
+  "databricks": {
+    "host_env": "DATABRICKS_HOST",
+    "token_env": "DATABRICKS_TOKEN",
+    "warehouse_env": "DATABRICKS_SQL_WAREHOUSE_ID",
+    "warehouse_id": "97c455ee6fb1fcb9"
+  }
+}
