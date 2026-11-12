@@ -1,165 +1,165 @@
-# ADR-002: Źródła danych (pliki, Databricks) i raporty
+# ADR-002: Data sources (files, Databricks) and reports
 
-**Data:** 2026-11-03
-**Status:** Accepted: pliki lokalne, Databricks przez REST, raport Markdown i pliki CSV. Proposed: Databricks CLI, raport HTML (faza 2).
-**Dotyczy:** [000-main-architecture.md](000-main-architecture.md); PRD §4.6–4.7, AC-25…AC-31, AC-37…AC-44; [DATABRICKS.md](../../course-materials/exercise-data/map-qa/DATABRICKS.md)
-
----
-
-## 1. Zakres
-
-Adaptery źródeł danych, sposób wyboru źródła, kontrakt odczytu Databricks i format raportów. Nie obejmuje dashboardu, bo nie ma go w PRD.
+**Date:** 2026-11-03
+**Status:** Accepted: local files, Databricks via REST, Markdown report and CSV files. Proposed: Databricks CLI, HTML report (phase 2).
+**Relates to:** [000-main-architecture.md](000-main-architecture.md); PRD §4.6–4.7, AC-25…AC-31, AC-37…AC-44; [DATABRICKS.md](../../course-materials/exercise-data/map-qa/DATABRICKS.md)
 
 ---
 
-## 2. Dokumentacja (sprawdzona 2026-11-03)
+## 1. Scope
 
-| Źródło | Context7 ID lub link | Co potwierdzono |
+Data source adapters, how the source is selected, the Databricks read contract and the report format. It does not cover a dashboard, because the PRD has none.
+
+---
+
+## 2. Documentation (checked 2026-11-03)
+
+| Source | Context7 ID or link | What was confirmed |
 |---|---|---|
-| SQL Statement Execution API | `/websites/databricks_api`; https://docs.databricks.com/aws/en/dev-tools/sql-execution-tutorial | `POST /api/2.0/sql/statements` przyjmuje `warehouse_id`, `statement`, `wait_timeout` (`0s` albo 5–50 s, domyślnie 10 s), `on_wait_timeout` (`CONTINUE` / `CANCEL`), `disposition` (`INLINE` do 25 MiB w JSON_ARRAY lub `EXTERNAL_LINKS`) i nazwane `parameters`. Status odpytujemy przez `GET /api/2.0/sql/statements/{id}`. Stany: PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED, CLOSED. Odczyt statusu może trwać do 5 s |
-| Databricks CLI | `/databricks/cli` | `databricks api post/get` opakowuje to samo REST API. **Na tej VM CLI nie jest zainstalowany** (`databricks: command not found`, 2026-11-03) |
-| Dane w Databricks | `DATABRICKS.md`, `sources.json` | 5 tabel `workspace.map_qa`, geometria jako WKB bez SRID, wspólny token ma zakres `sql`. Managed MCP zwraca 403 dla tego tokenu |
-| Jinja | `/websites/jinja_palletsprojects_en_stable` | `select_autoescape` dla HTML (faza 2) |
-| Streamlit, PySide6 | https://docs.streamlit.io, https://doc.qt.io/qtforpython-6/ | Nieużywane: dashboard poza PRD |
+| SQL Statement Execution API | `/websites/databricks_api`; https://docs.databricks.com/aws/en/dev-tools/sql-execution-tutorial | `POST /api/2.0/sql/statements` accepts `warehouse_id`, `statement`, `wait_timeout` (`0s` or 5–50 s, default 10 s), `on_wait_timeout` (`CONTINUE` / `CANCEL`), `disposition` (`INLINE` up to 25 MiB in JSON_ARRAY, or `EXTERNAL_LINKS`) and named `parameters`. Status is polled via `GET /api/2.0/sql/statements/{id}`. States: PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED, CLOSED. A status read can take up to 5 s |
+| Databricks CLI | `/databricks/cli` | `databricks api post/get` wraps the same REST API. **The CLI is not installed on this VM** (`databricks: command not found`, 2026-11-03) |
+| Data in Databricks | `DATABRICKS.md`, `sources.json` | 5 tables in `workspace.map_qa`, geometry as WKB without SRID, the shared token has `sql` scope. Managed MCP returns 403 for this token |
+| Jinja | `/websites/jinja_palletsprojects_en_stable` | `select_autoescape` for HTML (phase 2) |
+| Streamlit, PySide6 | https://docs.streamlit.io, https://doc.qt.io/qtforpython-6/ | Not used: dashboard is outside the PRD |
 
 ---
 
-## 3. Zbiory i źródła
+## 3. Datasets and sources
 
-| Zbiór | `local` | `databricks` |
+| Dataset | `local` | `databricks` |
 |---|---|---|
 | `osm_roads` | `osm_roads.parquet` | `workspace.map_qa.osm_roads` |
-| `signs` | `signs/signs.csv` | — (tylko lokalnie) |
+| `signs` | `signs/signs.csv` | — (local only) |
 | `nearest_osm` | `signs/nearest_osm.csv` | — |
-| `crops` | `signs/crops/` | — (obrazy zawsze lokalnie) |
-| `labels` | `signs/labels.csv` | — (tylko ewaluator) |
+| `crops` | `signs/crops/` | — (images always local) |
+| `labels` | `signs/labels.csv` | — (evaluator only) |
 | `source_meta` | `sources.json` | — |
 
-Każdy adapter zwraca ten sam kontrakt: tabelę z nazwanymi, typowanymi kolumnami oraz metadane `dataset`, `source_kind`, `location`, `chosen_by` (`option` / `env` / `config` / `default`), `rows`, `snapshot_rows`, `read_at`. Dla Databricks dochodzi jeszcze `statement_id`.
+Every adapter returns the same contract: a table with named, typed columns plus the metadata `dataset`, `source_kind`, `location`, `chosen_by` (`option` / `env` / `config` / `default`), `rows`, `snapshot_rows`, `read_at`. For Databricks, `statement_id` is added.
 
-### Wybór źródła (AC-37, AC-38)
+### Source selection (AC-37, AC-38)
 
-Kolejność pierwszeństwa: `--source-<dataset>` > `--source` > `MAPQA_SOURCE_<DATASET>` > `MAPQA_SOURCE` > plik konfiguracji > `local`. Plik konfiguracji podaje dla każdego zbioru ścieżkę lub `catalog.schema.table`, a dla Databricks tylko **nazwy** zmiennych hosta, tokenu i warehouse. Walidacja sekretów (AC-40), bez heurystyk długości: pola z nazwami zmiennych mają sufiks `_env` (`host_env`, `token_env`, `warehouse_env`), a ich wartość musi pasować do wzorca `^[A-Z][A-Z0-9_]*$`. Plik jest odrzucany, jeśli zawiera pole o nazwie `token`, `api_key`, `secret` lub `password`, albo jeśli dowolna wartość tekstowa zaczyna się od `dapi`, `Bearer `, `sk-` lub `ctx7sk`. Komunikat podaje nazwę pola, bez wartości. Identyfikator warehouse i hashe są dozwolone. Nie ma automatycznego zastępstwa przy awarii (PRD §4.7).
+Order of precedence: `--source-<dataset>` > `--source` > `MAPQA_SOURCE_<DATASET>` > `MAPQA_SOURCE` > config file > `local`. The config file gives, for each dataset, a path or `catalog.schema.table`, and for Databricks only the **names** of the host, token and warehouse variables. Secret validation (AC-40), without length heuristics: fields holding variable names have the suffix `_env` (`host_env`, `token_env`, `warehouse_env`), and their value must match the pattern `^[A-Z][A-Z0-9_]*$`. The file is rejected if it contains a field named `token`, `api_key`, `secret` or `password`, or if any string value starts with `dapi`, `Bearer `, `sk-` or `ctx7sk`. The message gives the field name, without the value. The warehouse ID and hashes are allowed. There is no automatic fallback on failure (PRD §4.7).
 
-### Kontrakt odczytu Databricks
+### Databricks read contract
 
-- Warehouse zawsze jawny. Nie wybieramy pierwszego dostępnego, jak robi `query_databricks.py`.
-- Zapytanie budowane z listy potrzebnych kolumn. Dla `osm_roads` to `osm_id`, `highway`, `tags` i kolumny `maxspeed*`, bez geometrii. Filtr to `osm_id IN (:id_0, :id_1, …)`, po jednym nazwanym markerze na identyfikator, każdy z typem kolumny `osm_id` z `manifest.schema`. Parametry Statement Execution API są skalarami, więc listy nie da się związać jednym markerem. Paczka liczy maksymalnie 256 identyfikatorów; MVP potrzebuje jednej paczki (≤ 119 dróg). Wartości nigdy nie są wklejane do tekstu SQL. Pobieramy tylko drogi wskazane w `nearest_osm`, więc wynik mieści się w INLINE.
-- Nazwa tabeli z konfiguracji musi pasować do wzorca `catalog.schema.table` (tylko litery, cyfry, `_`).
-- Strażnik: tekst zapytania zaczyna się od `SELECT` i nie zawiera `;`. Każde wysłane zapytanie trafia do logu przebiegu (AC-41).
-- `wait_timeout = 10s`, `on_wait_timeout = CONTINUE`; potem polling po `statement_id` co 2 s do limitu 180 s. **Nigdy nie ponawiamy POST** w ramach przebiegu (PRD §4.7).
-- Sprawdzamy obecność wymaganych kolumn.
-- AC-43 dla obu źródeł działa tak samo: liczba wierszy **całej tabeli** jest porównywana z liczbą w `sources.json`. Lokalnie to liczba wierszy pliku, w Databricks osobne zapytanie `SELECT count(*)`. Różnica daje ostrzeżenie z obiema wartościami, a przebieg trwa dalej. Osobno raportujemy identyfikatory z `nearest_osm`, których nie znaleziono w tabeli; dostają `abstain` (ADR-003).
-- Kategorie błędów: `missing_variable` (przed jakimkolwiek zapytaniem, AC-42), `auth` (401), `permission` (403), `query_failed` (FAILED, z `error_code`), `timeout`, `canceled`. Każdy błąd kończy przebieg kodem 2 przed wywołaniem modelu.
+- The warehouse is always explicit. We do not pick the first available one, as `query_databricks.py` does.
+- The query is built from the list of required columns. For `osm_roads` these are `osm_id`, `highway`, `tags` and the `maxspeed*` columns, without geometry. The filter is `osm_id IN (:id_0, :id_1, …)`, with one named marker per ID, each typed with the type of the `osm_id` column from `manifest.schema`. Statement Execution API parameters are scalars, so a list cannot be bound to a single marker. A batch holds at most 256 IDs; the MVP needs one batch (≤ 119 roads). Values are never pasted into the SQL text. We fetch only the roads referenced in `nearest_osm`, so the result fits in INLINE.
+- The table name from the config must match the pattern `catalog.schema.table` (letters, digits and `_` only).
+- Guard: the query text starts with `SELECT` and contains no `;`. Every query sent goes into the run log (AC-41).
+- `wait_timeout = 10s`, `on_wait_timeout = CONTINUE`; then polling by `statement_id` every 2 s up to a 180 s limit. **We never retry the POST** within a run (PRD §4.7).
+- We check that the required columns are present.
+- AC-43 works the same for both sources: the row count of the **whole table** is compared with the count in `sources.json`. Locally this is the file's row count; in Databricks a separate `SELECT count(*)` query. A difference produces a warning with both values, and the run continues. Separately, we report IDs from `nearest_osm` that were not found in the table; they get `abstain` (ADR-003).
+- Error categories: `missing_variable` (before any query, AC-42), `auth` (401), `permission` (403), `query_failed` (FAILED, with `error_code`), `timeout`, `canceled`. Every error ends the run with exit code 2 before the model is called.
 
 ---
 
-## 4. Raporty i pliki
+## 4. Reports and files
 
-| Plik | Status | Zawartość |
+| File | Status | Content |
 |---|---|---|
-| `report.md` | Accepted | Kolejno: nagłówek, podsumowanie, kandydaci, kolejka ręczna, „nie da się porównać”, ewaluacja (AC-26). Puste sekcje: „0 pozycji” |
-| `results.csv` | Accepted | Jeden wiersz na znak: odczyt, tier, wynik, surowe tagi OSM, powód abstencji |
-| `review.csv` | Accepted | Kolumny z PRD §9.3. Scalanie: klucz `row_id = photo_id + row_type`, wartości wpisane przez ludzi nigdy nie są nadpisywane (AC-29) |
-| `run.json` | Accepted | Parametry, źródła, wersje, hashe wejść, liczniki, log zapytań SQL |
-| `report.html` | Proposed (faza 2) | Jinja2 3.1.6 z `select_autoescape(["html"])`, miniatury ze ścieżkami względnymi |
+| `report.md` | Accepted | In order: header, summary, candidates, manual queue, „nie da się porównać” (cannot be compared), evaluation (AC-26). Empty sections: „0 pozycji” (0 items) |
+| `results.csv` | Accepted | One row per sign: reading, tier, result, raw OSM tags, abstention reason |
+| `review.csv` | Accepted | Columns from PRD §9.3. Merging: key `row_id = photo_id + row_type`; values entered by people are never overwritten (AC-29) |
+| `run.json` | Accepted | Parameters, sources, versions, input hashes, counters, SQL query log |
+| `report.html` | Proposed (phase 2) | Jinja2 3.1.6 with `select_autoescape(["html"])`, thumbnails with relative paths |
 
-Wymagania wspólne:
-- Liczniki raportu i CSV pochodzą z jednej struktury danych.
-- Nagłówek zawiera zdanie z AC-28.
-- Przy każdym linku do obrazu jest autor, źródło i licencja (AC-27).
-- Ścieżki są względne; pliki nie zawierają base64 ani sekretów.
-- Markdown escapuje znaki specjalne w tekstach z danych (`|`, `<`, `` ` ``).
+Common requirements:
+- Report and CSV counters come from one data structure.
+- The header contains the sentence from AC-28.
+- Every image link is accompanied by author, source and license (AC-27).
+- Paths are relative; files contain no base64 and no secrets.
+- Markdown escapes special characters in text from data (`|`, `<`, `` ` ``).
 
 ---
 
-## 5. Decyzje techniczne
+## 5. Technical decisions
 
-### Databricks przez REST (httpx), CLI odłożony
+### Databricks via REST (httpx), CLI deferred
 **Status:** Accepted (REST), Proposed (CLI)
-**Kontekst:** PRD AC-39 wymaga odczytu `osm_roads` z Databricks. Dostępne są REST, CLI, `databricks-sql-connector` i MCP.
-**Decyzja:** REST SQL Statement Execution API przez ten sam `httpx.Client` co w ADR-001.
-**Odrzucone:**
-- Databricks CLI (subprocess): nie jest zainstalowany na VM, a wywołuje to samo API. Zostaje jako możliwy drugi adapter z identycznym ciałem żądania.
-- `databricks-sql-connector` (`/databricks/databricks-sql-python`): inny protokół i własne ponowienia, a mamy zakaz ukrytych ponowień.
-- MCP: wspólny token z zakresem `sql` dostaje 403. MCP służy agentom do eksploracji, nie jest źródłem danych narzędzia.
-**Konsekwencje:** (+) jedna zależność HTTP, wspólne testy z capture; (−) polling i kategorie błędów trzeba napisać samemu.
-**Wyzwalacz przeglądu:** wynik przekracza 25 MiB albo organizacja wymaga CLI.
+**Context:** PRD AC-39 requires reading `osm_roads` from Databricks. REST, CLI, `databricks-sql-connector` and MCP are available.
+**Decision:** REST SQL Statement Execution API through the same `httpx.Client` as in ADR-001.
+**Rejected:**
+- Databricks CLI (subprocess): not installed on the VM, and it calls the same API. It remains a possible second adapter with an identical request body.
+- `databricks-sql-connector` (`/databricks/databricks-sql-python`): a different protocol with its own retries, and hidden retries are forbidden.
+- MCP: the shared token with `sql` scope gets 403. MCP serves agents for exploration; it is not a data source for the tool.
+**Consequences:** (+) one HTTP dependency, shared tests from captures; (−) polling and error categories must be written by hand.
+**Review trigger:** the result exceeds 25 MiB or the organization requires the CLI.
 
-### Tylko potrzebne kolumny i wiersze z Databricks
+### Only the required columns and rows from Databricks
 **Status:** Accepted
-**Kontekst:** `osm_roads` ma 99 768 wierszy z geometrią WKB, a INLINE ma limit 25 MiB. Każde zapytanie może uruchomić współdzielony warehouse.
-**Decyzja:** Jedno zapytanie na przebieg, z projekcją kolumn tagów i filtrem po identyfikatorach z `nearest_osm`.
-**Odrzucone:** pobranie całej tabeli z `EXTERNAL_LINKS`, bo to wolniejsze i wymaga obsługi linków.
-**Konsekwencje:** (+) mały wynik, szybki odczyt; (−) faza 2 (geometria) będzie wymagała `EXTERNAL_LINKS` albo filtra przestrzennego.
-**Wyzwalacz przeglądu:** faza 2.
+**Context:** `osm_roads` has 99 768 rows with WKB geometry, and INLINE has a 25 MiB limit. Each query may start the shared warehouse.
+**Decision:** One query per run, projecting the tag columns and filtering by the IDs from `nearest_osm`.
+**Rejected:** fetching the whole table with `EXTERNAL_LINKS`, because it is slower and requires link handling.
+**Consequences:** (+) small result, fast read; (−) phase 2 (geometry) will require `EXTERNAL_LINKS` or a spatial filter.
+**Review trigger:** phase 2.
 
-### Markdown bez szablonów, HTML z Jinja2
+### Markdown without templates, HTML with Jinja2
 **Status:** Accepted (Markdown), Proposed (HTML)
-**Kontekst:** MVP wymaga tylko Markdown i CSV. HTML z danymi zewnętrznymi wymaga escapowania.
-**Decyzja:** Markdown składany w Pythonie. HTML dopiero w fazie 2, z Jinja2 i autoescape.
-**Odrzucone:** HTML w czystym Pythonie, bo ręczne escapowanie to typowe źródło XSS.
-**Konsekwencje:** (+) zero nowych zależności w MVP; (−) w fazie 2 będą dwa sposoby generowania raportów.
-**Wyzwalacz przeglądu:** HTML w PRD.
+**Context:** The MVP requires only Markdown and CSV. HTML with external data requires escaping.
+**Decision:** Markdown assembled in Python. HTML only in phase 2, with Jinja2 and autoescape.
+**Rejected:** HTML in plain Python, because manual escaping is a typical source of XSS.
+**Consequences:** (+) zero new dependencies in the MVP; (−) in phase 2 there will be two ways of generating reports.
+**Review trigger:** HTML in the PRD.
 
-### Dashboard: brak decyzji
-**Status:** Proposed (odroczone)
-Notatka na przyszłość: Streamlit to szybki prototyp w przeglądarce, ale wymaga uruchomionego serwera. PySide6 to aplikacja desktopowa bez serwera, ale z większym kosztem implementacji.
+### Dashboard: no decision
+**Status:** Proposed (deferred)
+Note for the future: Streamlit is a fast browser prototype but needs a running server. PySide6 is a desktop application without a server, but with a higher implementation cost.
 
 ---
 
-## 6. Diagramy
+## 6. Diagrams
 
 ```mermaid
 flowchart LR
-    CFG[--source-X > --source > MAPQA_SOURCE_X > MAPQA_SOURCE > plik > local] --> SEL{Źródło zbioru}
+    CFG[--source-X > --source > MAPQA_SOURCE_X > MAPQA_SOURCE > file > local] --> SEL{Dataset source}
     SEL -->|local| L[DuckDB: CSV / Parquet]
     SEL -->|databricks| R[httpx: /api/2.0/sql/statements]
-    L --> N[Wspólny kontrakt tabeli + metadane źródła]
+    L --> N[Common table contract + source metadata]
     R --> N
-    IMG[Wycinki zawsze lokalnie] --> N
+    IMG[Crops always local] --> N
     N --> APP[inputs / cascade / compare / export]
 ```
 
 ```mermaid
 sequenceDiagram
-    participant A as adapter databricks
+    participant A as databricks adapter
     participant W as SQL warehouse
-    A->>A: sprawdź DATABRICKS_HOST, _TOKEN, _SQL_WAREHOUSE_ID (obecność)
-    A->>W: POST SELECT count(*) FROM osm_roads (porównanie z sources.json)
-    W-->>A: SUCCEEDED, liczba wierszy
+    A->>A: check DATABRICKS_HOST, _TOKEN, _SQL_WAREHOUSE_ID (presence)
+    A->>W: POST SELECT count(*) FROM osm_roads (comparison with sources.json)
+    W-->>A: SUCCEEDED, row count
     A->>W: POST SELECT osm_id, tags… WHERE osm_id IN (:id_0, …, :id_n) (wait 10s, CONTINUE)
     W-->>A: PENDING, statement_id
-    loop co 2 s, maks. 180 s
+    loop every 2 s, max. 180 s
         A->>W: GET /statements/{id}
         W-->>A: RUNNING
     end
     W-->>A: SUCCEEDED, manifest, data_array
-    A-->>A: kolumny OK, brakujące ID → abstain
-    Note over A,W: FAILED / CANCELED / timeout → kategoria błędu, kod 2, bez ponownego POST
+    A-->>A: columns OK, missing IDs → abstain
+    Note over A,W: FAILED / CANCELED / timeout → error category, exit code 2, no repeated POST
 ```
 
 ---
 
-## 7. Strategia testów
+## 7. Test strategy
 
-| Scenariusz | Typ | Wejście | Oczekiwany wynik | Przypadki brzegowe |
+| Scenario | Type | Input | Expected result | Edge cases |
 |---|---|---|---|---|
-| Pierwszeństwo źródeł | unit | sprzeczne opcja, zmienna, plik | wygrywa opcja; `chosen_by` poprawne | nic nie ustawione → `local` |
-| Sekret w konfiguracji | unit | pole `token`; wartość `dapi…`; `token_env` = `dapi…` | odrzucenie z nazwą pola, wartość nie w komunikacie | `warehouse_id = 97c455ee6fb1fcb9` i hash SHA-256 są akceptowane |
-| Parametry Databricks | unit | 95 identyfikatorów | 95 markerów `:id_n`, wartości tylko w `parameters`, nie w tekście SQL | 257 identyfikatorów → dwie paczki |
-| Strażnik SELECT | unit | `DELETE …`, `SELECT …; DROP …` | odrzucone przed wysłaniem | wielkość liter, komentarze SQL |
-| Polling | integration (mock z capture) | PENDING → RUNNING → SUCCEEDED | jeden POST, n GET | FAILED, timeout 180 s |
-| Brak zmiennej | unit | brak `DATABRICKS_TOKEN` | kod 2, nazwa zmiennej, zero żądań | pusty host |
-| Zgodność źródeł | e2e | `osm_roads` z Databricks vs lokalnie | identyczne wyniki i liczniki (AC-39) | — |
-| Scalanie review | unit | istniejący `review.csv` + nowe wiersze | wpisy ludzi niezmienione | usunięty znak z wejścia |
-| Escapowanie | unit | tag z `<script>` i `|` | tekst, nie znacznik; tabela nieuszkodzona | zero kandydatów |
+| Source precedence | unit | conflicting option, variable, file | option wins; `chosen_by` correct | nothing set → `local` |
+| Secret in config | unit | field `token`; value `dapi…`; `token_env` = `dapi…` | rejected with field name, value not in message | `warehouse_id = 97c455ee6fb1fcb9` and a SHA-256 hash are accepted |
+| Databricks parameters | unit | 95 IDs | 95 `:id_n` markers, values only in `parameters`, not in SQL text | 257 IDs → two batches |
+| SELECT guard | unit | `DELETE …`, `SELECT …; DROP …` | rejected before sending | letter case, SQL comments |
+| Polling | integration (mock from capture) | PENDING → RUNNING → SUCCEEDED | one POST, n GETs | FAILED, 180 s timeout |
+| Missing variable | unit | no `DATABRICKS_TOKEN` | exit code 2, variable name, zero requests | empty host |
+| Source parity | e2e | `osm_roads` from Databricks vs local | identical results and counters (AC-39) | — |
+| Review merge | unit | existing `review.csv` + new rows | people's entries unchanged | sign removed from input |
+| Escaping | unit | tag with `<script>` and `|` | text, not markup; table intact | zero candidates |
 
-Mock Databricks powstaje z capture realnego zapytania `SELECT … LIMIT 5` na `workspace.map_qa.osm_roads`, zapisanego jak w ADR-001 §5, bez tokenu i hosta.
+The Databricks mock is built from a capture of a real `SELECT … LIMIT 5` query on `workspace.map_qa.osm_roads`, saved as in ADR-001 §5, without the token and host.
 
-### Techniczne kryteria akceptacji
+### Technical acceptance criteria
 
-- TAC-002-01: Przebieg z `osm_roads` z Databricks daje te same `results.csv` (poza kolumnami źródła) co przebieg lokalny.
-- TAC-002-02: Log przebiegu zawiera dokładnie jeden POST na zapytanie i wyłącznie instrukcje `SELECT`.
-- TAC-002-03: `--dry-run` kończy się kodem 0 bez żadnego żądania HTTP i bez odczytu plików danych (AC-44).
-- TAC-002-04: Wartość `DATABRICKS_TOKEN` nie występuje w żadnym pliku wynikowym ani logu (test skanujący).
+- TAC-002-01: A run with `osm_roads` from Databricks produces the same `results.csv` (apart from the source columns) as a local run.
+- TAC-002-02: The run log contains exactly one POST per query and only `SELECT` statements.
+- TAC-002-03: `--dry-run` exits with code 0 without any HTTP request and without reading data files (AC-44).
+- TAC-002-04: The value of `DATABRICKS_TOKEN` does not appear in any output file or log (scanning test).
