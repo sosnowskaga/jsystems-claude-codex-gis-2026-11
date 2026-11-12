@@ -200,7 +200,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 - All local input files are read-only. Run outputs go to `reports/map-qa/run/`, which is ignored by Git, so the analyst's `review.csv` is not versioned and must be kept or backed up by the analyst. The answer cache goes to an ignored data directory. Committed analysis such as `reports/map-qa/profile.md` stays in `reports/map-qa/`.
 - Licences and attribution must be preserved: OSM data under ODbL 1.0, photos under CC BY-SA 4.0 with author credit.
 - The sign labels were produced by AI agents and are not fully human-verified; they are a working reference, not ground truth. Each disagreement needs a human look at the crop.
-- Paid model calls need a request and cost budget allocated by the course trainer before the first call. API keys and Databricks tokens are read only from environment variables and are never printed or logged.
+- Paid model calls need a request and cost budget allocated before the first call. Granted on 2026-11-12: Jev 1.14, Luna Decisions and GPT-6 Luna may be used for development captures, E2E and manual tests, with a total cost under 1 USD. The per-tier limits below still apply to each evaluation experiment. API keys and Databricks tokens are read only from environment variables and are never printed or logged.
 - The shared Databricks token has the `sql` scope; read-only behaviour is enforced by the tool. Queries can start a shared warehouse; each dataset is read once per run (for a Databricks dataset: one row-count query and one projected read).
 
 ### Functional

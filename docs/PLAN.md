@@ -16,7 +16,7 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 | B1 | `uv` installed on the VM | everything | **Resolved:** uv 0.13.7, Python 3.12.16 managed by uv |
 | B2 | Decision on the uncommitted PRD / `ADR/000-local-sign-mvp.md` on `main` | repository consistency | **Resolved:** plan scope is the full MVP from this branch; the older draft is archived in the local branch `archive/local-sign-mvp` |
 | B3 | `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_SQL_WAREHOUSE_ID` + one capture of `SELECT … LIMIT 5` | increment 9 | **Access confirmed** (count read `SUCCEEDED`, profile §9). The variables must be set in the shell that starts the agent. **Capture still missing** |
-| B4 | Budget and cost limit granted by the trainer, `OPENROUTER_API_KEY` | increment 10 | none |
+| B4 | Budget and cost limit granted by the trainer, `OPENROUTER_API_KEY` | increment 10 | **Resolved 2026-11-12:** budget granted (in-app models < 1 USD in total); key present in the agent environment |
 
 ---
 

@@ -42,7 +42,7 @@ Every requirement that needs a human is moved to the **pre-flight decision sheet
 | D1 | `fork/main` has 15 commits this branch lacks; `git merge-tree` predicts no conflicts. Merge first? PR base? | Merge `fork/main` in P0, so the trainer's latest `AGENTS.md` applies. PR base: `sosnowskaga:main` | P0 skips the merge; PR base is still asked at the end |
 | D2 | Accept ADR-004 (§3) without a separate review stop? | Yes. The orchestrator writes it as Accepted-by-preauthorization, and the human reviews it in the PR | Flow stops after T1 |
 | D3 | ~~Per-tier cache in `cache` mode~~ | **Decided 2026-11-12:** per-tier cache; `off` never reads it ([ADR-001 §5](../ADR/001-decision-cascade.md#5-client-limits-cache-capture)) | — |
-| D4 | P7 live calls: budget, cost limit and `OPENROUTER_API_KEY` in the shell that starts the agent (B4) | Granted limits per [PRD §8](../PRD.md#functional): ≤ 25 tier-1 and ≤ 10 tier-2 requests | **P7 is skipped.** The flow continues with P8–P9, and the PR lists P7 as blocked |
+| D4 | ~~P7 live calls: budget~~ | **Granted 2026-11-12.** Jev 1.14, Luna Decisions and GPT-6 Luna may be used for captures, E2E and manual tests without a practical cap (total < 1 USD). `OPENROUTER_API_KEY` was present in the agent's environment on 2026-11-12 (checked for presence only). The PRD stage limits (≤ 25 tier-1, ≤ 10 tier-2) remain the app's per-experiment defaults for stages 1–2. Test runs use a separate `experiment_id`, so they do not consume the stage ledger | Only if the key is missing when P7 starts: P7 is skipped and listed as blocked in the PR |
 | D5 | Stage-1 and stage-2 samples (`app/samples/*.txt`) go into live use without a human approving the selection ([ADR-000 §8](../ADR/000-main-architecture.md#samples-as-fixed-identifier-lists) requires approval before the first paid call) | Approve now: the selection must meet the PRD §12 criteria, checked by a test | P7 stops before the first paid call |
 | D6 | Databricks capture and the Databricks E2E run use the shared warehouse | Yes; the 4 captures listed in [ADR-002 §7](../ADR/002-data-sources-and-reports.md#7-test-strategy), then one parity run | P6 is skipped and listed as blocked in the PR |
 | D7 | Allow `git push fork map-app-implementation` and `gh pr create` at the end without asking | Yes, push to `fork` only, no merge | Flow stops before P9 push |
@@ -258,7 +258,10 @@ If time or model access runs out, the minimum deliverable is **stage 0 locally: 
 ## 9. Cost notes
 
 - Workers: Codex about 6 runs (Sol 4, Luna 2), OpenCode 1, Haiku about 6 plus fixes. Codex and OpenCode usage counts against the user's own plans; `--json` logs record tokens.
-- Paid API calls happen **only in P7** and only within D4: ≤ 25 tier-1 and ≤ 10 tier-2 requests, including captures and failures (AC-15).
+- **Where the money goes:** agent time on strong models (Opus orchestrator, Codex Sol) is the main cost. The app's own model calls are cheap: Jev $0.042/1M input tokens, Luna Decisions $0.10/1M, GPT-6 Luna as in ADR-001 §5. All captures, E2E and manual tests together stay under 1 USD (D4).
+  - Do not ration real calls; a real capture or E2E run is always preferred to a guessed mock (§8).
+  - Save on orchestration instead: bounded work goes to Haiku, Codex Luna or OpenCode MiMo. Opus and Sol are kept for contracts, integration, rule-heavy modules and review.
+- Model calls happen only from P7 on. The stage-1/2 evaluation keeps the PRD limits (AC-15: ≤ 25 tier-1, ≤ 10 tier-2 per experiment), because they define the measured sample, not the budget.
 - Databricks: one capture and one parity run on the shared warehouse (D6).
 
 ---
