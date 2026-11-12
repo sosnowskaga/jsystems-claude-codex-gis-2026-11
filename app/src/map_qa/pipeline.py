@@ -19,6 +19,7 @@ from map_qa.export import (
     write_run_json,
 )
 from map_qa.inputs import load_inputs
+from map_qa.ledger import AnswerCache, Ledger
 from map_qa.models import (
     DEFAULT_TIER2_MODEL,
     LUNA_DECISIONS_MODEL,
@@ -170,6 +171,7 @@ def execute(
     settings: Settings,
     options: RunOptions,
     evaluator: Callable[[Path, Settings], str] | None = None,
+    backends: dict | None = None,
 ) -> RunSummary:
     check_live_prerequisites(settings, options)
     chosen_by = {name: s.chosen_by for name, s in settings.sources.items()}
@@ -183,7 +185,15 @@ def execute(
     review_verdicts = verdicts(existing_review)
 
     tiers = tier_configs(options)
-    cascade = Cascade(mode=settings.model_mode, threshold=options.threshold, tiers=tiers)
+    cache = AnswerCache(options.cache_path) if settings.model_mode in ("cache", "live") else None
+    cascade = Cascade(
+        mode=settings.model_mode,
+        threshold=options.threshold,
+        tiers=tiers,
+        cache=cache,
+        backends=backends or {},
+        ledger_factory=lambda: Ledger(options.cache_path / "ledger.json", options.experiment_id, tiers),
+    )
     cascade_result = cascade.run(signs, humans)
 
     results: list[SignResult] = []
