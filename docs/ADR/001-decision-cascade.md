@@ -29,7 +29,7 @@ Wybór modeli i klienta, kontrakt pytania, reguły przyjęcia i eskalacji, limit
 | Rola | Model | Wejście | Cena za 1M tokenów (2026-11-03) |
 |---|---|---|---|
 | Tier 1 | `typesafe/jev-1.14` | tekst, obraz; kontekst 262 144 | wejście 0,042 USD, wyjście 0 |
-| Porównanie (tylko etap 1) | `openai/gpt-6-luna-decisions` | tekst, obraz; kontekst 1 050 000 | wejście 0,10 USD, wyjście 0 |
+| Porównanie (Proposed, poza MVP) | `openai/gpt-6-luna-decisions` | tekst, obraz; kontekst 1 050 000 | wejście 0,10 USD, wyjście 0 |
 | Tier 2 | `openai/gpt-6-luna` | tekst, obraz; reasoning, structured outputs | wejście 0,10 USD, wyjście 0,50 USD |
 
 Identyfikatory są w konfiguracji. Zmiana modelu zmienia klucz cache.
@@ -40,7 +40,7 @@ Identyfikatory są w konfiguracji. Zmiana modelu zmienia klucz cache.
 
 ### Wersja
 
-`question_version = b33-v1`. Każda zmiana treści pytania, etykiet lub schematu podnosi wersję. Wersja, próg i limity trafiają do `run.json` przed pierwszym wywołaniem etapu 2 i nie zmieniają się do jego końca (AC-14).
+`question_version = b33-v1`. Każda zmiana treści pytania, etykiet lub schematu podnosi wersję. Wersja, próg i limity trafiają do `run.json` przed pierwszym płatnym wywołaniem na znakach z etykietami, czyli przed etapem 1, i nie zmieniają się do końca etapu 2 (AC-14). Zmiana progu po etapie 1 wymaga nowej wersji reguły i nowej ewaluacji na znakach odłożonych (PRD §12), nie na już zmierzonych.
 
 ### Zbiór odpowiedzi (PRD §11)
 
@@ -84,12 +84,20 @@ Brak `probabilities` nie jest zastępowany polem `confidence`. Próg 0,80 to war
 | Model | Limit prób | Limit kosztu |
 |---|---|---|
 | Tier 1 (Jev) | 25 | z przydziału trenera |
-| Porównanie (Luna Decisions) | 5, tylko etap 1 | z przydziału trenera |
 | Tier 2 (Luna) | 10 | z przydziału trenera |
 
+Innych płatnych modeli MVP nie wywołuje. `--dry-run` (AC-44) pokazuje maksymalnie 25 + 10 wywołań.
+
 - Licznik rośnie **przed** wysłaniem żądania i obejmuje błędy, timeouty i capture (AC-15).
-- Przed każdym żądaniem system rezerwuje koszt górny: rozmiar obrazu przeliczony na tokeny ostrożnym współczynnikiem plus pytanie, razy cena wejścia. Dla tier 2 dochodzi `max_tokens` razy cena wyjścia. Jeśli wykorzystany koszt plus rezerwacja przekroczyłby limit, żądanie nie jest wysyłane, a tier jest wyłączony do końca przebiegu.
-- Po odpowiedzi rezerwację zastępuje `usage.cost`. Gdy tego pola brak, rezerwacja zostaje.
+- Przed każdym żądaniem system rezerwuje stałą, konfigurowalną kwotę na wywołanie. Wartości domyślne:
+
+  | Tier | Rezerwacja | Podstawa (ceny z 2026-11-03) |
+  |---|---|---|
+  | 1 (Jev) | 0,0005 USD | ok. 12 000 tokenów wejścia × 0,042 USD/1M, z zapasem; wyjście darmowe |
+  | 2 (Luna) | 0,004 USD | 12 000 tokenów wejścia × 0,10 USD/1M + `max_tokens = 4000` (z tokenami rozumowania) × 0,50 USD/1M, z zapasem |
+
+  Jeśli wykorzystany koszt plus rezerwacja przekroczyłby limit kosztu tieru, żądanie nie jest wysyłane, a tier jest wyłączony do końca przebiegu.
+- Po odpowiedzi rezerwację zastępuje `usage.cost`. Gdy tego pola brak, rezerwacja zostaje. Jeśli `usage.cost` przekroczy rezerwację, tier jest wyłączony do końca przebiegu, a raport podaje obie kwoty; przed kolejnym przebiegiem trzeba podnieść rezerwację w konfiguracji.
 - `ledger.json` jest trwały dla `experiment_id`; wznowienie nie zeruje liczników.
 
 ### Cache
@@ -116,13 +124,15 @@ Brak `probabilities` nie jest zastępowany polem `confidence`. Próg 0,80 to war
 **Konsekwencje:** (+) brak ukrytych ponowień, capture 1:1; (−) własne parsowanie i mapowanie błędów.
 **Wyzwalacz przeglądu:** Decisions API wychodzi z alpha.
 
-### Jev 1.14 jako tier 1, Luna Decisions tylko porównawczo
-**Status:** Accepted
-**Kontekst:** Oba modele przyjmują obrazy i zwracają rozkład; Jev jest około 2,4 razy tańszy na token wejścia.
-**Decyzja:** Jev w kaskadzie. Luna Decisions dostaje te same 5 wycinków etapu 1 z tym samym pytaniem, a wynik trafia do raportu porównawczego.
-**Odrzucone:** Luna Decisions jako tier 1, bo jest droższa bez zmierzonej przewagi.
-**Konsekwencje:** (+) niższy koszt; (−) wybór nie opiera się na pomiarze jakości.
-**Wyzwalacz przeglądu:** w etapie 1 Luna Decisions ma więcej poprawnych przyjęć niż Jev przy zerze błędnych.
+### Jev 1.14 jako tier 1; porównanie z Luna Decisions poza MVP
+**Status:** Accepted (Jev); Proposed (porównanie)
+**Kontekst:** Oba modele przyjmują obrazy i zwracają rozkład; Jev jest około 2,4 razy tańszy na token wejścia. Limity PRD §8 obejmują tylko tier 1 i tier 2.
+**Decyzja:** Jev w kaskadzie. Porównanie z Luna Decisions na tych samych 5 wycinkach etapu 1 jest możliwe dopiero po dopisaniu do PRD osobnego limitu (5 wywołań) i przydziału budżetu. Do tego czasu kod nie wywołuje tego modelu.
+**Odrzucone:**
+- Luna Decisions jako tier 1: droższa bez zmierzonej przewagi.
+- Porównanie w ramach limitu tier 1: zużyłoby 5 z 25 wywołań, które PRD §12 rozdziela już na etapy 1 i 2.
+**Konsekwencje:** (+) koszt zgodny z PRD; (−) wybór Jev nie opiera się na pomiarze jakości.
+**Wyzwalacz przeglądu:** PRD dostaje limit porównania albo Jev nie spełnia celów z PRD §12.
 
 ### GPT-6 Luna jako tier 2
 **Status:** Accepted
@@ -131,7 +141,7 @@ Brak `probabilities` nie jest zastępowany polem `confidence`. Próg 0,80 to war
 **Odrzucone:**
 - `anthropic/claude-haiku-5.5`: ta sama cena, odrzucony decyzją użytkowniczki.
 - `anthropic/claude-sonnet-5.5`: 20 razy droższy.
-**Konsekwencje:** (+) niski koszt, inny dostawca niż Jev; (−) ta sama rodzina co Luna Decisions, więc ich porównanie w etapie 1 nie jest niezależne. LLM nie zwraca skalibrowanego rozkładu, dlatego PRD przyjmuje każdą odpowiedź ze zbioru.
+**Konsekwencje:** (+) niski koszt, inny dostawca niż Jev; (−) ta sama rodzina co Luna Decisions, więc ewentualne przyszłe porównanie tych dwóch modeli nie będzie niezależne. LLM nie zwraca skalibrowanego rozkładu, dlatego PRD przyjmuje każdą odpowiedź ze zbioru.
 **Wyzwalacz przeglądu:** błędne przyjęcie tier 2 w etapie 2 albo zmiana tier 1 na model z rodziny Luna.
 
 ### Pewność z rozkładu, nie z deklaracji
@@ -228,7 +238,7 @@ sequenceDiagram
 | Cache i wznowienie | integration | przebieg live (mock z capture), potem cache | drugi przebieg: 0 żądań, te same wyniki (AC-03) | zmiana progu: przeliczenie bez żądań |
 | Błąd usługi | integration | 429, timeout | `model_unavailable`, znak idzie dalej, transport liczy 1 żądanie | błąd w obu tierach → kolejka |
 
-E2E `live` dopiero po przyznaniu budżetu: najpierw po jednym żądaniu capture na model, potem etap 1 (5 znaków, Jev + Luna Decisions + tier 2), potem etap 2 i etap 3 w trybie `cache`.
+E2E `live` dopiero po przyznaniu budżetu: najpierw po jednym żądaniu capture na model, potem etap 1 (5 znaków, Jev + tier 2), potem etap 2 i etap 3 w trybie `cache`.
 
 ### Techniczne kryteria akceptacji
 
