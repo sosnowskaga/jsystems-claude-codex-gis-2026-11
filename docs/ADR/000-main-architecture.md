@@ -268,9 +268,9 @@ sequenceDiagram
 |---|---|---|---|
 | Unit | all dependencies | rules, parsing, configuration, review merging | pytest |
 | Integration | only the external LLM and Databricks, from capture | real exercise files, real DuckDB | pytest + `httpx.MockTransport` |
+| E2E | none | real CLI, files, OpenRouter and Databricks | pytest with the `live` marker, skipped by default with a stated reason |
 
 Deliberate deviation from the repository `AGENTS.md` test table, which allows mocks only for the external LLM API in integration tests: Databricks is mocked too. Like the LLM, it is an external, shared and potentially paid service, and the same rule applies to it: mocks only from a real capture (ADR-002 §7).
-| E2E | none | real CLI, files, OpenRouter and Databricks | pytest with the `live` marker, skipped by default with a stated reason |
 
 ### Key scenarios (stage 0)
 
