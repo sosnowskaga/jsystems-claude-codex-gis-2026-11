@@ -1,6 +1,6 @@
 # ADR-003: Speed normalization, photo-to-road linking and spatial computations
 
-**Date:** 2026-11-03
+**Date:** 2026-11-03 (updated 2026-11-12: data profile, implicit limits)
 **Status:**
 - Accepted (MVP): normalization of OSM `maxspeed*` and comparison rules (PRD AC-19…AC-23), abstention based on flags from `nearest_osm.csv`.
 - Proposed (phase 2): spatial engine, EPSG:2180, own photo-to-road linking, Overture `speed_limits`.
@@ -22,8 +22,20 @@ In the MVP, the sign-to-road link comes from `signs/nearest_osm.csv`, and geomet
 | DuckDB spatial | `/websites/duckdb_current`; https://duckdb.org/docs/stable/core_extensions/spatial/overview | The function has the form `ST_Transform(geom, source_crs, target_crs, always_xy)`. EPSG:4326 defines the axis order as [lat, lon], so lon/lat data needs `always_xy := true`. DuckDB has its own copy of the PROJ database |
 | GeoPandas | `/geopandas/geopandas`; https://geopandas.org/en/stable/docs.html | `sjoin_nearest` has `max_distance` and `distance_col`. Distances require a projected CRS |
 | Data | `course-materials/exercise-data/map-qa/README.md`, `sources.json` | Candidate ranking rule, 25 m radius, meaning of flags |
+| Data profile | [reports/map-qa/profile.md](../../reports/map-qa/profile.md) (2026-11-12, DuckDB 1.5.6) | CRS, validity, keys, `maxspeed*` formats, Overture rules |
 
-Facts from the data: OSM has 99 768 roads in EPSG:4326. Directional and conditional tags are rare: 261 `:forward`, 247 `:backward`, 92 `:conditional`. Overture has 85 405 segments with no declared CRS (the source states CRS84, i.e. lon/lat). 12 847 segments have speed rules, including 911 with multiple rules. `speed_limits` is a list of structs `max_speed {value, unit}`, `min_speed`, `is_max_speed_variable`, `when {heading, during, using[], recognized[], …}`, `between [from, to]`.
+Facts from the data: OSM has 99 768 roads in EPSG:4326 (GeoParquet 1.1.0 `crs`). Directional and conditional tags are rare: 261 `:forward`, 247 `:backward`, 92 `:conditional`. Overture has 85 405 segments in GeoParquet 1.0.0 with no `crs` member, which by the specification means CRS84 (lon/lat); DuckDB reads it as `GEOMETRY('OGC:CRS84')`. Both layers have 0 invalid and 0 empty geometries, LineString only. 12 847 segments have speed rules, including 911 with multiple rules. `speed_limits` is a list of structs `max_speed {value, unit}`, `min_speed`, `is_max_speed_variable`, `when {heading, during, using[], recognized[], …}`, `between [from, to]`.
+
+Speed-tag facts from the profile (2026-11-12):
+- **OSM `maxspeed` holds only integer km/h**: 16 290 ways, 16 values from 4 to 140. No unit, `PL:…`, `none`, `;` or `mph` occurs in it. All `kind` values other than `numeric` therefore come from synthetic test inputs, not real fixtures.
+- Real non-numeric values exist in other tags:
+  - 5 × `PL:urban` in `maxspeed:forward` / `maxspeed:backward`;
+  - `maxspeed:type` on 2 578 ways, of which 1 392 have no `maxspeed`;
+  - `source:maxspeed` on 11 671 ways;
+  - `zone:maxspeed=PL:30` on 19 ways;
+  - `maxspeed:lanes` pipe lists on 10 ways.
+- `maxspeed:conditional` has one value in the whole extract: `110 @ (Mo-Fr 06:00-18:00)`.
+- Overture: 14 205 rules on 12 847 segments, all with `max_speed` in `km/h`. 1 925 have `between`, 880 have `when`, 16 are `is_max_speed_variable`.
 
 ---
 
@@ -32,7 +44,7 @@ Facts from the data: OSM has 99 768 roads in EPSG:4326. Directional and conditio
 ### Normalization of `maxspeed*` tags (Accepted)
 
 Each road gets a list of rules. Fields of each rule:
-- `source_tag`: `maxspeed`, `maxspeed:forward`, `maxspeed:backward` or `maxspeed:conditional`;
+- `source_tag`: `maxspeed`, `maxspeed:forward`, `maxspeed:backward`, `maxspeed:conditional`, or one of the implicit-limit tags `maxspeed:type`, `source:maxspeed`, `zone:maxspeed`. The implicit-limit tags are read from `osm_roads.tags` because `nearest_osm.csv` does not contain them. They count only when the value has a country-code prefix (`PL:…`), so `source:maxspeed=sign` does not count;
 - `raw`: the exact tag text, unchanged;
 - `kind`, `value_kmh`, `unit_raw`, `condition_raw`.
 
@@ -55,8 +67,8 @@ An empty tag means no rule, never 0. Text that cannot be recognized gets `kind =
 |---|---|
 | `abstain` | non-empty `match_flags` in `nearest_osm.csv`, road absent from `osm_roads`, or `area ≠ Kraków` |
 | `pending_human` | no accepted reading value |
-| `not_comparable` | reading `none`, or any `:forward` / `:backward` / `:conditional` tag is present, or `maxspeed` has a `kind` other than `numeric` |
-| `map_missing` | numeric reading and all four tags absent |
+| `not_comparable` | reading `none`, or any `:forward` / `:backward` / `:conditional` tag is present (the condition is not evaluated against `captured_at`), or `maxspeed` has a `kind` other than `numeric`, or all four tags are absent but an implicit-limit tag is present (reason `implicit_limit`, statutory limit not derived) |
+| `map_missing` | numeric reading, all four tags absent and no implicit-limit tag |
 | `match` / `mismatch` | numeric reading, only `maxspeed` with `kind = numeric`, values equal / different |
 
 A comparison outcome never means a map error. Only an analyst can issue the `confirmed` verdict.
@@ -142,10 +154,10 @@ flowchart TD
 
 | Scenario | Type | Input | Expected outcome | Edge cases |
 |---|---|---|---|---|
-| `maxspeed` normalization | unit | `50`, `50 km/h`, `30 mph`, `PL:urban`, `none`, `50;70`, `60 @ (22:00-06:00)`, empty, `abc` | `kind` and `value_kmh` as in §3, `raw` unchanged | empty ≠ 0; `30 mph` + reading 50 → `not_comparable`, not `mismatch` |
-| Comparison | unit | reading 50 + `maxspeed=50`; + `maxspeed=40`; + no tags; + `:forward=50` | `match`; `mismatch`; `map_missing`; `not_comparable` | reading `none` |
+| `maxspeed` normalization | unit | `50`, `50 km/h`, `30 mph`, `PL:urban`, `none`, `50;70`, `60 @ (22:00-06:00)`, empty, `abc` | `kind` and `value_kmh` as in §3, `raw` unchanged | empty ≠ 0; `30 mph` + reading 50 → `not_comparable`, not `mismatch`. Inputs other than integers are synthetic, because the real `maxspeed` has only integers (profile §7) |
+| Comparison | unit | reading 50 + `maxspeed=50`; + `maxspeed=40`; + no tags; + `:forward=50`; + only `maxspeed:type=PL:rural`; + only `source:maxspeed=sign` | `match`; `mismatch`; `map_missing`; `not_comparable`; `not_comparable` (`implicit_limit`); `map_missing` | reading `none` |
 | Abstention | integration | real `nearest_osm.csv` rows with flags | `abstain` with the flag as the reason | road absent from local OSM (4 cases) |
-| Expected counts (MVP phase, from PRD §12) | integration, evaluation only | 74 numeric Kraków labels as readings | 13 `match`, 18 `mismatch`, 7 `map_missing`, 7 `not_comparable` | test in the `evaluate` module, not in the run path |
+| Expected counts (MVP phase, from PRD §12) | integration, evaluation only | 74 numeric Kraków labels as readings | 13 `match`, 18 `mismatch`, 5 `map_missing`, 9 `not_comparable` | test in the `evaluate` module, not in the run path |
 | Phase 2: known distance | integration | point and line in EPSG:2180 | agreement with GeoPandas within 0.01 m | deliberately swapped axes → the test must fail |
 | Phase 2: heading 359 vs 1, reversed geometry | unit | angles, `oneway=-1` | 2° difference; undirected unchanged | empty heading |
 | Phase 2: Overture | unit | segment with 3 rules | 3 rows, one unconditional | `between = [0, 1]` |

@@ -12,9 +12,9 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 
 | # | Prerequisite | Blocks | Status (2026-11-12) |
 |---|---|---|---|
-| B1 | `uv` installed on the VM | everything | **Missing** (`uv: command not found`; system Python is 3.14.9, the ADR requires 3.12 through uv) |
-| B2 | Decision on the uncommitted PRD / `ADR/000-local-sign-mvp.md` on `main` | repository consistency | Plan scope: the full MVP from this branch (user decision, 2026-11-12). The files on `main` are to be removed or archived |
-| B3 | `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_SQL_WAREHOUSE_ID` + one capture of `SELECT … LIMIT 5` | increment 9 | unknown |
+| B1 | `uv` installed on the VM | everything | **Resolved:** uv 0.13.7, Python 3.12.16 managed by uv |
+| B2 | Decision on the uncommitted PRD / `ADR/000-local-sign-mvp.md` on `main` | repository consistency | **Resolved:** plan scope is the full MVP from this branch; the older draft is archived in the local branch `archive/local-sign-mvp` |
+| B3 | `DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `DATABRICKS_SQL_WAREHOUSE_ID` + one capture of `SELECT … LIMIT 5` | increment 9 | **Access confirmed** (count read `SUCCEEDED`, profile §9). The variables must be set in the shell that starts the agent. **Capture still missing** |
 | B4 | Budget and cost limit granted by the trainer, `OPENROUTER_API_KEY` | increment 10 | none |
 
 ---
@@ -57,7 +57,7 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 
 ### 7. Evaluation — AC-32…AC-36
 - `evaluate`: the only reader of `labels.csv` (architecture test TAC-000-05); per-tier metrics with denominators; Mapillary detector baseline; threshold recalculation from stored distributions.
-- Test TAC-003-02: labels substituted as readings → 13 `match` / 18 `mismatch` / 7 `map_missing` / 7 `not_comparable`.
+- Test TAC-003-02: labels substituted as readings → 13 `match` / 18 `mismatch` / 5 `map_missing` / 9 `not_comparable` (2 implicit-limit roads, decision of 2026-11-12).
 - Samples `app/samples/stage1.txt` (5) and `stage2.txt` (20) per PRD §12, selected by a one-off script. Check whether `reports/map-qa/pilot-manifest.csv` from `main` (25 rows) meets the PRD §12 criteria; if not, select again.
 
 ### 8. (buffer) Cleanup and review

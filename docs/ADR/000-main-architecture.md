@@ -1,8 +1,9 @@
 # ADR-000: Map QA — speed sign check, main architecture
 
-**Date:** 2026-11-03
+**Date:** 2026-11-03 (updated 2026-11-12: data profile, live Databricks read)
 **Status:** Accepted (MVP, phase 1)
 **PRD:** [docs/PRD.md](../PRD.md)
+**Data profile:** [reports/map-qa/profile.md](../../reports/map-qa/profile.md)
 
 ---
 
@@ -14,6 +15,12 @@ This document sets the stack, modules, data models, CLI and test strategy. Detai
 - [001-decision-cascade.md](001-decision-cascade.md): models, question contract, limits, cache, capture (Accepted);
 - [002-data-sources-and-reports.md](002-data-sources-and-reports.md): files and Databricks, reports (Accepted; HTML Proposed);
 - [003-spatial-and-speed-normalization.md](003-spatial-and-speed-normalization.md): normalization of OSM `maxspeed*` (Accepted), linking a photo to a road, EPSG:2180 and Overture (Proposed, phase 2).
+
+The input profile from 2026-11-12 confirms the assumptions of these ADRs:
+- No invalid geometry, no duplicate keys, and every `photo_id` and road reference resolves.
+- The five `workspace.map_qa` tables in Databricks have the same row counts as the local files.
+
+Details and the facts that changed decisions are in [reports/map-qa/profile.md](../../reports/map-qa/profile.md).
 
 ---
 
@@ -27,7 +34,7 @@ Context7 IDs were checked on 2026-11-03 via Context7 MCP. Package versions were 
 | DuckDB Python | `/duckdb/duckdb-python` | Connection API |
 | OpenRouter | `/websites/openrouter_ai` | Decisions API, Chat Completions, model catalog |
 | Databricks API | `/websites/databricks_api` | SQL Statement Execution API |
-| Databricks CLI | `/databricks/cli` | Rejected in MVP (ADR-002) |
+| Databricks CLI | `/databricks/cli` | Not used by the app in the MVP (Proposed, ADR-002); v1.26.0 installed on the VM for manual checks |
 | GeoPandas | `/geopandas/geopandas` | Phase 2, cross-check (ADR-003) |
 | Jinja | `/websites/jinja_palletsprojects_en_stable` | HTML in phase 2 |
 | pytest | https://docs.pytest.org/en/stable/ | Tests |
@@ -102,7 +109,7 @@ Direction: `cli` → `config` → `sources` → `inputs` → `cascade` (→ `dec
 |---|---|---|
 | Sign | `photo_id`, `area`, `sequence`, `crop_path`, `crop_sha256`, author, license, `source_url`, `mapillary_value` (baseline only) | input |
 | RoadLink | `photo_id`, `osm_way_id`, `distance_m`, `match_flags`, `candidate_count` | input (`nearest_osm.csv`) |
-| OsmSpeedTags | `osm_way_id`, raw `maxspeed`, `maxspeed:forward`, `maxspeed:backward`, `maxspeed:conditional`, rules after normalization, snapshot date | input + ADR-003 |
+| OsmSpeedTags | `osm_way_id`, raw `maxspeed`, `maxspeed:forward`, `maxspeed:backward`, `maxspeed:conditional`, raw implicit-limit tag (`maxspeed:type` / `source:maxspeed` / `zone:maxspeed` from `osm_roads.tags`), rules after normalization, snapshot date | input + ADR-003 |
 | StageAnswer | `photo_id`, `tier`, `model`, `question_version`, `image_sha256`, `status`, raw response, `answer`, `probabilities`, `cost_usd`, `latency_ms`, `error_category`, `requested_at` | cache and `run.json` |
 | SignReading | `photo_id`, `value` (number / `none` / `unreadable` / empty), `tier` (`decision_model` / `llm` / `human`), escalation reasons | `results.csv` |
 | Comparison | `photo_id`, `outcome`, `abstain_reason`, reading, `osm_way_id`, raw tags | `results.csv` |

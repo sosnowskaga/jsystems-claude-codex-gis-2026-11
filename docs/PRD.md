@@ -138,11 +138,11 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 
 ### Comparison with the map
 
-- **AC-19:** For each compared sign, the results CSV and report show the sign value and its tier, the OSM way id, and the raw OSM `maxspeed`, `maxspeed:forward`, `maxspeed:backward` and `maxspeed:conditional` values.
+- **AC-19:** For each compared sign, the results CSV and report show the sign value and its tier, the OSM way id, and the raw OSM `maxspeed`, `maxspeed:forward`, `maxspeed:backward` and `maxspeed:conditional` values, plus the raw implicit-limit tag (AC-23) when one is present.
 - **AC-20:** `match`: the sign value and the OSM `maxspeed` are both numeric in km/h and equal, and no directional or conditional speed tag is present.
 - **AC-21:** `mismatch`: as AC-20, but the values differ.
-- **AC-22:** `map_missing`: the sign value is numeric and the road has none of the four OSM speed tags.
-- **AC-23:** `not_comparable`: the sign value is `none`, or the OSM speed is not a number in km/h (for example `PL:urban`, `none`, `50;70`, `30 mph`), or a directional or conditional speed tag is present. The raw values are shown.
+- **AC-22:** `map_missing`: the sign value is numeric, the road has none of the four OSM speed tags and no implicit-limit tag (AC-23).
+- **AC-23:** `not_comparable`: the sign value is `none`, or the OSM speed is not a number in km/h (for example `PL:urban`, `none`, `50;70`, `30 mph`), or a directional or conditional speed tag is present, or the road has none of the four speed tags but has an implicit-limit tag: `maxspeed:type`, `source:maxspeed` or `zone:maxspeed` with a country-code value such as `PL:urban`, `PL:rural` or `PL:zone30`. The statutory limit is not derived, and a conditional tag is not evaluated against the photo time. The raw values are shown.
 - **AC-24:** The outcome is `pending_human` while no value has been accepted for the sign.
 
 ### Outputs and review
@@ -317,8 +317,8 @@ One question per crop, in English, neutral, with the closed answer set:
 |---|---|
 | `match` | Sign value equals the single numeric OSM `maxspeed`. |
 | `mismatch` | Sign value and single numeric OSM `maxspeed` differ. Candidate. |
-| `map_missing` | Sign value numeric; road has no OSM speed tag. Candidate. |
-| `not_comparable` | Sign `none`, OSM speed that is not a number in km/h, or directional/conditional speed tags. |
+| `map_missing` | Sign value numeric; road has no OSM speed tag and no implicit-limit tag. Candidate. |
+| `not_comparable` | Sign `none`, OSM speed that is not a number in km/h, directional/conditional speed tags, or only an implicit-limit tag (e.g. `maxspeed:type=PL:rural`). |
 | `abstain` | Sign-to-road link not trusted, road not in the dataset, or sign outside Kraków. |
 | `pending_human` | No value accepted yet; in the manual queue. |
 
@@ -376,7 +376,7 @@ With 25 signs these are go/no-go signals for the workflow, not accuracy estimate
 
 ### Expected map outcomes for Kraków (from the labels, before any model run)
 
-Of the 99 Kraków signs, 74 have a numeric label. With a trusted link and the road found in the OSM roads file, the comparison rules in AC-20 to AC-23 give: 13 `match`, 18 `mismatch`, 7 `map_missing`, 7 `not_comparable` (directional or conditional speed tags). The high share of mismatches is expected to come mainly from signs assigned to the wrong nearby road. This is why every candidate needs the analyst's verdict.
+Of the 99 Kraków signs, 74 have a numeric label. With a trusted link and the road found in the OSM roads file, the comparison rules in AC-20 to AC-23 give: 13 `match`, 18 `mismatch`, 5 `map_missing`, 9 `not_comparable` (7 with directional or conditional speed tags, 2 with only an implicit limit: `PL:rural`, `PL:expressway`). Recomputed on 2026-11-12, see `reports/map-qa/profile.md`. The high share of mismatches is expected to come mainly from signs assigned to the wrong nearby road. This is why every candidate needs the analyst's verdict.
 
 ---
 

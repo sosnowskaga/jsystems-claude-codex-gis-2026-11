@@ -1,8 +1,8 @@
 # ADR-002: Data sources (files, Databricks) and reports
 
-**Date:** 2026-11-03
+**Date:** 2026-11-03 (updated 2026-11-12: Databricks CLI installed, first live read)
 **Status:** Accepted: local files, Databricks via REST, Markdown report and CSV files. Proposed: Databricks CLI, HTML report (phase 2).
-**Relates to:** [000-main-architecture.md](000-main-architecture.md); PRD §4.6–4.7, AC-25…AC-31, AC-37…AC-44; [DATABRICKS.md](../../course-materials/exercise-data/map-qa/DATABRICKS.md)
+**Relates to:** [000-main-architecture.md](000-main-architecture.md); PRD §4.6–4.7, AC-25…AC-31, AC-37…AC-44; [DATABRICKS.md](../../course-materials/exercise-data/map-qa/DATABRICKS.md); [profile.md](../../reports/map-qa/profile.md) §9
 
 ---
 
@@ -17,8 +17,9 @@ Data source adapters, how the source is selected, the Databricks read contract a
 | Source | Context7 ID or link | What was confirmed |
 |---|---|---|
 | SQL Statement Execution API | `/websites/databricks_api`; https://docs.databricks.com/aws/en/dev-tools/sql-execution-tutorial | `POST /api/2.0/sql/statements` accepts `warehouse_id`, `statement`, `wait_timeout` (`0s` or 5–50 s, default 10 s), `on_wait_timeout` (`CONTINUE` / `CANCEL`), `disposition` (`INLINE` up to 25 MiB in JSON_ARRAY, or `EXTERNAL_LINKS`) and named `parameters`. Status is polled via `GET /api/2.0/sql/statements/{id}`. States: PENDING, RUNNING, SUCCEEDED, FAILED, CANCELED, CLOSED. A status read can take up to 5 s |
-| Databricks CLI | `/databricks/cli` | `databricks api post/get` wraps the same REST API. **The CLI is not installed on this VM** (`databricks: command not found`, 2026-11-03) |
+| Databricks CLI | `/databricks/cli` | `databricks api post/get` wraps the same REST API. On 2026-11-03 the CLI was not installed (`databricks: command not found`). Since 2026-11-12 it is installed (v1.26.0, winget) |
 | Data in Databricks | `DATABRICKS.md`, `sources.json` | 5 tables in `workspace.map_qa`, geometry as WKB without SRID, the shared token has `sql` scope. Managed MCP returns 403 for this token |
+| Live read (2026-11-12) | `query_databricks.py`, [profile.md](../../reports/map-qa/profile.md) §9 | One `SELECT count(*)` over the 5 tables, using the environment variables. Result: `SUCCEEDED`, 1 chunk, `truncated: false`. Counts equal the local files: 99 768 / 85 405 / 561 / 561 / 1 730. With `format = JSON_ARRAY`, **every value in `data_array` is a JSON string**: the `BIGINT` count came back as `"99768"`, and `manifest.schema` gives `type_name = LONG`. Only counts were compared, not attributes |
 | Jinja | `/websites/jinja_palletsprojects_en_stable` | `select_autoescape` for HTML (phase 2) |
 | Streamlit, PySide6 | https://docs.streamlit.io, https://doc.qt.io/qtforpython-6/ | Not used: dashboard is outside the PRD |
 
@@ -49,6 +50,7 @@ Order of precedence: `--source-<dataset>` > `--source` > `MAPQA_SOURCE_<DATASET>
 - Guard: the query text starts with `SELECT` and contains no `;`. Every query sent goes into the run log (AC-41).
 - `wait_timeout = 10s`, `on_wait_timeout = CONTINUE`; then polling by `statement_id` every 2 s up to a 180 s limit. **We never retry the POST** within a run (PRD §4.7).
 - We check that the required columns are present.
+- Values in `data_array` are converted by `manifest.schema[].type_name`, never inferred from the JSON value. `LONG` and `INT` become integers, `STRING` is kept as is, and JSON `null` becomes a missing value. `osm_id` (`LONG`) must compare equal to the local `BIGINT`, otherwise every road would look absent. Observed on 2026-11-12.
 - AC-43 works the same for both sources: the row count of the **whole table** is compared with the count in `sources.json`. Locally this is the file's row count; in Databricks a separate `SELECT count(*)` query. A difference produces a warning with both values, and the run continues. Separately, we report IDs from `nearest_osm` that were not found in the table; they get `abstain` (ADR-003).
 - Error categories: `missing_variable` (before any query, AC-42), `auth` (401), `permission` (403), `query_failed` (FAILED, with `error_code`), `timeout`, `canceled`. Every error ends the run with exit code 2 before the model is called.
 
@@ -80,7 +82,7 @@ Common requirements:
 **Context:** PRD AC-39 requires reading `osm_roads` from Databricks. REST, CLI, `databricks-sql-connector` and MCP are available.
 **Decision:** REST SQL Statement Execution API through the same `httpx.Client` as in ADR-001.
 **Rejected:**
-- Databricks CLI (subprocess): not installed on the VM, and it calls the same API. It remains a possible second adapter with an identical request body.
+- Databricks CLI (subprocess): installed since 2026-11-12, but it calls the same API. It would add a second runtime dependency and output parsing. It remains a possible second adapter with an identical request body, and the CLI stays useful for manual checks.
 - `databricks-sql-connector` (`/databricks/databricks-sql-python`): a different protocol with its own retries, and hidden retries are forbidden.
 - MCP: the shared token with `sql` scope gets 403. MCP serves agents for exploration; it is not a data source for the tool.
 **Consequences:** (+) one HTTP dependency, shared tests from captures; (−) polling and error categories must be written by hand.
@@ -150,12 +152,13 @@ sequenceDiagram
 | Databricks parameters | unit | 95 IDs | 95 `:id_n` markers, values only in `parameters`, not in SQL text | 257 IDs → two batches |
 | SELECT guard | unit | `DELETE …`, `SELECT …; DROP …` | rejected before sending | letter case, SQL comments |
 | Polling | integration (mock from capture) | PENDING → RUNNING → SUCCEEDED | one POST, n GETs | FAILED, 180 s timeout |
+| Type conversion | unit (from capture) | `data_array` with `"99768"`, `null`, schema `LONG` / `STRING` | integers by schema; `osm_id` joins with local `BIGINT` | value as string without a schema entry → error, not a guess |
 | Missing variable | unit | no `DATABRICKS_TOKEN` | exit code 2, variable name, zero requests | empty host |
 | Source parity | e2e | `osm_roads` from Databricks vs local | identical results and counters (AC-39) | — |
 | Review merge | unit | existing `review.csv` + new rows | people's entries unchanged | sign removed from input |
 | Escaping | unit | tag with `<script>` and `|` | text, not markup; table intact | zero candidates |
 
-The Databricks mock is built from a capture of a real `SELECT … LIMIT 5` query on `workspace.map_qa.osm_roads`, saved as in ADR-001 §5, without the token and host.
+The Databricks mock is built from a capture of a real `SELECT … LIMIT 5` query on `workspace.map_qa.osm_roads`, saved as in ADR-001 §5, without the token and host. Access was confirmed on 2026-11-12, but that capture is not saved yet. The count read printed only the parsed result, not the HTTP status, headers and body, so it is not a capture. It is saved in increment 9 of the plan.
 
 ### Technical acceptance criteria
 
