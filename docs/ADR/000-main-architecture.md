@@ -53,9 +53,9 @@ Jednoprocesowy monolit CLI. Brak serwera, bazy danych i UI. Stan trwały to plik
 | `app/config.example.json` | Przykładowa konfiguracja: oba typy lokalizacji, tylko nazwy zmiennych z sekretami |
 | `app/samples/stage1.txt`, `stage2.txt` | Stałe listy `photo_id` próbek z PRD §12 |
 | `reports/map-qa/` | Raport Markdown, `results.csv`, `review.csv`, `run.json`, log zapytań |
-| `course-materials/exercise-data/map-qa/data/cache/` | Cache odpowiedzi i `ledger.json` (katalog ignorowany przez Git) |
+| `app/.cache/map-qa/` | Cache odpowiedzi i `ledger.json` (katalog ignorowany przez Git) |
 
-Wejścia w `course-materials/exercise-data/map-qa/` są tylko do odczytu.
+Wejścia w `course-materials/exercise-data/map-qa/` są tylko do odczytu. Narzędzie nie zapisuje tam niczego, także cache; dzięki temu AC-01 obejmuje cały folder wejść.
 
 ### Stos
 

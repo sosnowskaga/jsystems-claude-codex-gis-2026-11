@@ -12,6 +12,9 @@ build/
 skills-lock.json
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+app/.cache/
 .playwright-cli
 
 # Private agent briefs and Java build artifacts
