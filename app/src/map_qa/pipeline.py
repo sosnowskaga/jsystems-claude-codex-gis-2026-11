@@ -54,6 +54,7 @@ class RunOptions:
     max_cost_tier2: float = 0.10
     experiment_id: str = "default"
     yes: bool = False
+    confirm: Callable[[], bool] | None = None  # asks the user (AC-18)
     env: dict[str, str] = field(default_factory=lambda: dict(os.environ))
 
     @property
@@ -143,9 +144,36 @@ def max_calls(mode: str, tiers: dict[str, TierConfig], n_signs: int | None) -> d
 def check_live_prerequisites(settings: Settings, options: RunOptions) -> None:
     if settings.model_mode != "live":
         return
+    # PRD §4.7 item 5: checked before the confirmation prompt; only presence, never the value.
     if not options.env.get("OPENROUTER_API_KEY"):
         raise MapQaError("model mode 'live': environment variable OPENROUTER_API_KEY is not set")
-    raise MapQaError("model mode 'live' is not implemented in this build")
+
+
+class RunDeclined(Exception):
+    """The user did not confirm the live-mode calls (exit code 1)."""
+
+
+def default_backends(mode: str, tiers: dict[str, TierConfig], env: dict[str, str]) -> dict:
+    """Tier backends parse cached answers (cache, live) and send requests (live only)."""
+    if mode not in ("cache", "live"):
+        return {}
+    from map_qa.decisions_client import DecisionsBackend
+    from map_qa.llm_client import ChatBackend
+
+    return {
+        "tier1": DecisionsBackend(tiers["tier1"].model, env=env, timeout_s=tiers["tier1"].timeout_s),
+        "tier2": ChatBackend(tiers["tier2"].model, env=env, timeout_s=tiers["tier2"].timeout_s),
+    }
+
+
+def confirmation_text(n_crops: int, tiers: dict[str, TierConfig]) -> str:
+    lines = [f"Tryb live: do wysłania co najwyżej {n_crops} wycinków (odpowiedzi z cache nie są wysyłane)."]
+    for name, tier in tiers.items():
+        lines.append(
+            f"  {name} {tier.model}: limit {tier.max_requests} żądań, {tier.max_cost_usd:.4f} USD, "
+            f"rezerwacja {tier.reservation_usd:.4f} USD/żądanie, limit czasu {tier.timeout_s:g} s"
+        )
+    return "\n".join(lines)
 
 
 def roads_source_for(settings: Settings, env: dict[str, str]):
@@ -185,6 +213,13 @@ def execute(
     review_verdicts = verdicts(existing_review)
 
     tiers = tier_configs(options)
+    if settings.model_mode == "live":
+        n_crops = sum(1 for s in signs if s.photo_id not in humans)
+        print(confirmation_text(n_crops, tiers))
+        if not options.yes and not (options.confirm or (lambda: False))():
+            raise RunDeclined("live-mode calls not confirmed")
+    if backends is None:
+        backends = default_backends(settings.model_mode, tiers, options.env)
     cache = AnswerCache(options.cache_path) if settings.model_mode in ("cache", "live") else None
     cascade = Cascade(
         mode=settings.model_mode,

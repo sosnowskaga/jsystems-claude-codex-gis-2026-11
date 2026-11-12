@@ -58,16 +58,27 @@ def test_unknown_sample_id_exits_2(tmp_path: Path, no_network_env):
     assert "not_a_photo" in result.stderr
 
 
-@pytest.mark.parametrize("key", [None, "present"])
-def test_live_mode_checks_key_then_reports_not_implemented(tmp_path: Path, no_network_env, key):
+def test_live_mode_without_key_exits_2_before_the_prompt(tmp_path: Path, no_network_env):
     env = {k: v for k, v in no_network_env.items() if k != "OPENROUTER_API_KEY"}
-    if key:
-        env["OPENROUTER_API_KEY"] = "test-key-value"
     result = run_cli(["run", "--model-mode", "live", "--out", str(tmp_path)], env=env)
     assert result.returncode == 2
-    if key:
-        assert "not implemented" in result.stderr
-        assert "test-key-value" not in result.stderr + result.stdout
-    else:
-        assert "OPENROUTER_API_KEY" in result.stderr
+    assert "OPENROUTER_API_KEY" in result.stderr
+    assert "Wysłać żądania" not in result.stdout  # PRD §4.7 item 5: before the confirmation
     assert not (tmp_path / "report.md").exists()
+
+
+def test_live_mode_shows_crops_and_limits_and_sends_nothing_until_confirmed(tmp_path: Path, no_network_env):
+    """AC-18: the prompt lists crops and limits; a declined prompt sends no request (exit 1)."""
+    env = dict(no_network_env, OPENROUTER_API_KEY="test-key-value")
+    result = run_cli(
+        ["run", "--model-mode", "live", "--sample", "stage1", "--out", str(tmp_path), "--cache-dir", str(tmp_path / "c")],
+        env=env,
+        input_text="n\n",
+    )
+    assert result.returncode == 1, result.stderr
+    assert "co najwyżej 5 wycinków" in result.stdout
+    assert "limit 25 żądań" in result.stdout and "limit 10 żądań" in result.stdout
+    assert "NetworkBlocked" not in result.stderr
+    assert "test-key-value" not in result.stdout + result.stderr
+    assert not (tmp_path / "report.md").exists()
+    assert not (tmp_path / "c" / "ledger.json").exists()

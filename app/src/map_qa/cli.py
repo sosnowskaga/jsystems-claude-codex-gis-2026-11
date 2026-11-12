@@ -149,13 +149,28 @@ def _run(args: argparse.Namespace) -> int:
         experiment_id=args.experiment_id,
         yes=args.yes,
         env=env,
+        confirm=_ask_confirmation,
     )
     if args.dry_run:
         _print_dry_run(settings, options)
         return EXIT_OK
-    summary = execute(settings, options, evaluator=evaluate.evaluation_markdown)
+    from map_qa.pipeline import RunDeclined
+
+    try:
+        summary = execute(settings, options, evaluator=evaluate.evaluation_markdown)
+    except RunDeclined:
+        print("Przerwano: brak potwierdzenia, nie wysłano żadnego żądania.", file=sys.stderr)
+        return EXIT_DECLINED
     _print_summary(summary)
     return EXIT_OK
+
+
+def _ask_confirmation() -> bool:
+    try:
+        answer = input("Wysłać żądania do modeli? [t/N] ")
+    except EOFError:
+        return False
+    return answer.strip().lower() in ("t", "tak", "y", "yes")
 
 
 def _evaluate(args: argparse.Namespace) -> int:
