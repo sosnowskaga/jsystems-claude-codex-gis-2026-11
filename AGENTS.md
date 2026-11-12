@@ -6,7 +6,7 @@ This is a **course project** for the "AI dla programistów: agenci AI w pracy z 
 
 This is only the **base starting repository** for the course; concrete decisions are made live with the group.
 
-Chat in Polish unless the user asks for another language. Course PRD/ADR exercises and participant-facing project documentation use Polish. Keep filenames and code identifiers in English. The optional teaching library retains its source languages. This is a greenfield scaffold, not an agreed product specification. For a legacy-led course, keep materials separate and work in the original application clone; adapt these instructions to its actual stack and verification commands.
+Chat in Polish unless the user asks for another language. Course PRD/ADR exercises and participant-facing project documentation use English. Keep filenames and code identifiers in English. The optional teaching library retains its source languages. This is a greenfield scaffold, not an agreed product specification. For a legacy-led course, keep materials separate and work in the original application clone; adapt these instructions to its actual stack and verification commands.
 
 **Key docs** (created during the course — load only when in doubt):
 - `docs/PRD.md` — product requirements and acceptance criteria
