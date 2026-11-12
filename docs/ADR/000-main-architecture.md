@@ -65,7 +65,7 @@ Wejścia w `course-materials/exercise-data/map-qa/` są tylko do odczytu.
 | Odczyt i złączenia | DuckDB 1.5.6 | CSV i Parquet jednym silnikiem, SQL zgodny z Databricks; wersja sprawdzona skryptami ćwiczenia. DuckDB 2.0.0 (2026-10-21) to nowe wydanie główne, nieprzetestowane z tymi danymi |
 | Arrow | pyarrow 23.0.1 | Wersja sprawdzona w ćwiczeniu |
 | HTTP | httpx 0.28.1 | Jeden klient: OpenRouter i Databricks REST; jawny timeout, zero ponowień |
-| Modele | `typesafe/jev-1.14` (tier 1), `openai/gpt-6-luna` (tier 2), `openai/gpt-6-luna-decisions` (porównanie w etapie 1) | ADR-001 |
+| Modele | `typesafe/jev-1.14` (tier 1), `openai/gpt-6-luna` (tier 2) | ADR-001; porównanie z `openai/gpt-6-luna-decisions` jest poza MVP |
 | Raport | Markdown z biblioteki standardowej | Bez nowej zależności; HTML w fazie 2 |
 | Testy | pytest 9.2.0 | Standard projektu |
 | Hash | `hashlib` | Obraz wysyłany bajt w bajt; Pillow niepotrzebny |
@@ -120,7 +120,7 @@ Kierunek: `cli` → `config` → `sources` → `inputs` → `cascade` (→ `deci
 | `map-qa run --dry-run` | Źródło i lokalizacja każdego zbioru oraz maksymalna liczba wywołań na tier; bez odczytu danych | 0 |
 | `map-qa run --model-mode off` (domyślnie) | Pełny przebieg, wszystko bez wartości ludzkiej → `pending_human` | 0 |
 | `map-qa run --model-mode cache` | Tylko cache; braki → `model_unavailable` → kolejka | 0 |
-| `map-qa run --model-mode live --sample stage1 [--yes]` | Wywołania w limitach; potwierdzenie przed pierwszym | 0; 3 limit/budżet wyczerpany z informacją w raporcie |
+| `map-qa run --model-mode live --sample stage1 [--yes]` | Wywołania w limitach; potwierdzenie przed pierwszym | 0, także gdy limit lub budżet tieru się wyczerpał: tier jest pomijany, znaki idą dalej kaskadą, a raport podaje, który limit osiągnięto (PRD §4.7) |
 | `map-qa evaluate` | Sekcja ewaluacji z etykiet | 0 |
 | błędy wejścia, źródła, `review.csv` | Jedna linia z nazwą zbioru, pliku, kolumny, zmiennej lub wiersza | 2 |
 
