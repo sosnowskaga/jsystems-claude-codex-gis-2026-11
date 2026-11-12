@@ -24,3 +24,15 @@ def test_env_selects_databricks_and_missing_token_stops_before_any_query(tmp_pat
     assert "missing_variable" in result.stderr and "DATABRICKS_TOKEN" in result.stderr
     assert "NetworkBlocked" not in result.stderr  # stopped before any connection attempt
     assert not (tmp_path / "run" / "report.md").exists()
+
+
+def test_configured_local_paths_are_used(tmp_path: Path, no_network_env):
+    """Review finding: datasets.<name>.local from the config must be read, not the default path."""
+    import json
+
+    config = tmp_path / "config.json"
+    data_dir = (Path(__file__).resolve().parents[3] / "course-materials" / "exercise-data" / "map-qa").as_posix()
+    config.write_text(json.dumps({"data_dir": data_dir, "datasets": {"signs": {"local": "signs/missing.csv"}}}), encoding="utf-8")
+    result = run_cli(["run", "--config", str(config), "--out", str(tmp_path / "run")], env=no_network_env)
+    assert result.returncode == 2
+    assert "signs: file not found: signs/missing.csv" in result.stderr

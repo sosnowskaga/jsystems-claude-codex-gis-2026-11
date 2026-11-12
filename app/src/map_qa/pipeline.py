@@ -203,7 +203,9 @@ def execute(
 ) -> RunSummary:
     check_live_prerequisites(settings, options)
     chosen_by = {name: s.chosen_by for name, s in settings.sources.items()}
-    bundle = load_inputs(settings.data_dir, roads_source_for(settings, options.env), chosen_by)
+    bundle = load_inputs(settings.data_dir, roads_source_for(settings, options.env), chosen_by,
+        locations={n: s.location for n, s in settings.sources.items() if s.kind == "local" and n != "osm_roads"},
+    )
 
     sample = resolve_sample(options.sample, {s.photo_id for s in bundle.signs})
     signs = bundle.signs if sample is None else [s for s in bundle.signs if s.photo_id in set(sample)]

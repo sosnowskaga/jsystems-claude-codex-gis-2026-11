@@ -43,13 +43,23 @@ def implicit_limit(tags: dict[str, Any]) -> tuple[str | None, str | None]:
     return None, None
 
 
-def load_inputs(data_dir: Path, roads_source: RoadsSource, chosen_by: dict[str, str] | None = None) -> InputBundle:
+def load_inputs(
+    data_dir: Path,
+    roads_source: RoadsSource,
+    chosen_by: dict[str, str] | None = None,
+    locations: dict[str, str] | None = None,
+) -> InputBundle:
+    """``locations`` overrides the local paths of ``signs``, ``nearest_osm`` and ``crops`` (relative to data_dir)."""
+    loc = locations or {}
+    signs_rel = loc.get("signs", SIGNS_REL)
+    nearest_rel = loc.get("nearest_osm", NEAREST_REL)
+    crops_rel_dir = loc.get("crops", CROPS_REL_DIR).rstrip("/")
     chosen = chosen_by or {}
     now = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     hashes: dict[str, str] = {}
 
-    signs_path = _require_file(data_dir, SIGNS_REL, "signs")
-    nearest_path = _require_file(data_dir, NEAREST_REL, "nearest_osm")
+    signs_path = _require_file(data_dir, signs_rel, "signs")
+    nearest_path = _require_file(data_dir, nearest_rel, "nearest_osm")
     sources_path = _require_file(data_dir, SOURCES_REL, "source_meta")
 
     sign_columns, sign_rows = _read_csv(signs_path)
@@ -57,8 +67,8 @@ def load_inputs(data_dir: Path, roads_source: RoadsSource, chosen_by: dict[str, 
     near_columns, near_rows = _read_csv(nearest_path)
     _check_columns(near_columns, NEAREST_COLUMNS, "nearest_osm", nearest_path.name)
 
-    hashes[SIGNS_REL] = _sha256(signs_path)
-    hashes[NEAREST_REL] = _sha256(nearest_path)
+    hashes[signs_rel] = _sha256(signs_path)
+    hashes[nearest_rel] = _sha256(nearest_path)
 
     sign_dicts = [_row_dict(sign_columns, row) for row in sign_rows]
     near_dicts = [_row_dict(near_columns, row) for row in near_rows]
@@ -84,12 +94,12 @@ def load_inputs(data_dir: Path, roads_source: RoadsSource, chosen_by: dict[str, 
             raise MapQaError(f"nearest_osm: no row for photo_id '{row['photo_id']}'")
     links = {row["photo_id"]: links[row["photo_id"]] for row in sign_dicts}
 
-    crops_dir = data_dir / CROPS_REL_DIR
+    crops_dir = data_dir / crops_rel_dir
     photos_dir = data_dir / PHOTOS_REL_DIR
     signs: list[Sign] = []
     for row in sign_dicts:
         photo_id = row["photo_id"]
-        crop_rel = f"{CROPS_REL_DIR}/{photo_id}.jpg"
+        crop_rel = f"{crops_rel_dir}/{photo_id}.jpg"
         crop_path = crops_dir / f"{photo_id}.jpg"
         if not crop_path.is_file():
             raise MapQaError(f"crops: file not found: {crop_rel}")
@@ -143,7 +153,7 @@ def load_inputs(data_dir: Path, roads_source: RoadsSource, chosen_by: dict[str, 
         SourceMeta(
             dataset="signs",
             source_kind="local",
-            location=SIGNS_REL,
+            location=signs_rel,
             chosen_by=chosen.get("signs", "default"),
             rows=len(sign_dicts),
             read_at=now,
@@ -151,7 +161,7 @@ def load_inputs(data_dir: Path, roads_source: RoadsSource, chosen_by: dict[str, 
         SourceMeta(
             dataset="nearest_osm",
             source_kind="local",
-            location=NEAREST_REL,
+            location=nearest_rel,
             chosen_by=chosen.get("nearest_osm", "default"),
             rows=len(near_dicts),
             read_at=now,
@@ -159,7 +169,7 @@ def load_inputs(data_dir: Path, roads_source: RoadsSource, chosen_by: dict[str, 
         SourceMeta(
             dataset="crops",
             source_kind="local",
-            location=f"{CROPS_REL_DIR}/",
+            location=f"{crops_rel_dir}/",
             chosen_by=chosen.get("crops", "default"),
             rows=crop_count,
             read_at=now,
