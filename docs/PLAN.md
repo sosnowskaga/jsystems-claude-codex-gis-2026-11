@@ -79,3 +79,13 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 
 1. ~~Tier-2 cache in `cache` mode~~: **closed 2026-11-12.** The cache is checked per tier; a miss counts as `model_unavailable`; `off` never reads the cache (ADR-001 §5, PRD §4.5).
 2. ~~CLI option names~~: **closed 2026-11-12.** ADR-000 §6 now lists `--model-mode`, `--sample`, `--yes` and `--dry-run`. The contract test in increment 1 fixes them.
+
+---
+
+## Execution log
+
+Tracker for [plans/implementation-plan.md](plans/implementation-plan.md) (§10). Task ids T0–T19 are from its dependency matrix.
+
+- T0 tool probe (2026-11-12): Haiku subagent, `codex exec -m gpt-6-luna -s read-only` (exit 0) and `opencode run -m xiaomi-token-plan-ams/mimo-v2.6-flash` (exit 0) all answered; no file changed.
+- T0a: `fork/main` merged without conflicts; root `AGENTS.md` unchanged by the merge.
+- T1: [ADR-004](ADR/004-mvp-file-and-cli-contract.md) written (Accepted by pre-authorization, D2).
