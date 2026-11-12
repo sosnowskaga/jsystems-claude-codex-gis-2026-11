@@ -22,3 +22,4 @@ app/.cache/
 **/target/
 *.class
 /.idea
+/.claude/worktrees
