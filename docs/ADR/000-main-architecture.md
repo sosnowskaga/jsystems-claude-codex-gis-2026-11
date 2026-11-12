@@ -17,7 +17,7 @@ This document sets the stack, modules, data models, CLI and test strategy. Detai
 - [003-spatial-and-speed-normalization.md](003-spatial-and-speed-normalization.md): normalization of OSM `maxspeed*` (Accepted), linking a photo to a road, EPSG:2180 and Overture (Proposed, phase 2).
 
 The input profile from 2026-11-12 confirms the assumptions of these ADRs:
-- No invalid geometry, no duplicate keys, and every `photo_id` and road reference resolves.
+- No invalid geometry and no duplicate keys. Every `photo_id` and road reference in `photo_road_links.csv` resolves. For the sign set, 24 `nearest_osm` way ids are not in the local `osm_roads` (4 in Kraków, 20 outside); those signs get `abstain` (ADR-003).
 - The five `workspace.map_qa` tables in Databricks have the same row counts as the local files.
 
 Details and the facts that changed decisions are in [reports/map-qa/profile.md](../../reports/map-qa/profile.md).
@@ -59,7 +59,8 @@ Single-process CLI monolith. No server, database or UI. Persistent state is file
 | `app/tests/fixtures/captures/` | Real API responses for mocks (ADR-001 §5) |
 | `app/config.example.json` | Example configuration: both location types, only names of variables holding secrets |
 | `app/samples/stage1.txt`, `stage2.txt` | Fixed `photo_id` lists of the samples from PRD §12 |
-| `reports/map-qa/` | Markdown report, `results.csv`, `review.csv`, `run.json`, query log |
+| `reports/map-qa/run/` | Run outputs: Markdown report, `results.csv`, `review.csv`, `run.json`, query log. Ignored by Git (human decision, 2026-11-12), so `review.csv` is not versioned |
+| `reports/map-qa/` | Committed analysis (`profile.md`) and one-off scripts |
 | `app/.cache/map-qa/` | Response cache and `ledger.json` (directory ignored by Git) |
 
 Inputs in `course-materials/exercise-data/map-qa/` are read-only. The tool writes nothing there, including the cache; this way AC-01 covers the whole input folder.
@@ -83,7 +84,7 @@ We do not use the OpenAI client, LangChain or the `openrouter` SDK (ADR-001 §6)
 
 ## 4. Modules and dependencies
 
-Direction: `cli` → `config` → `sources` → `inputs` → `cascade` (→ `decisions_client`, `llm_client`, `ledger`) → `compare` → `export`. `evaluate` reads only results and labels; nothing imports it. No cycles.
+Direction: `cli` → `config` → `sources` → `inputs` → `cascade` (→ `decisions_client`, `llm_client`, `ledger`) → `compare` → `export`. `evaluate` reads only results and labels, and only `cli` imports it. After `export` writes the results, `map-qa run` calls `evaluate` to fill the evaluation section of `report.md` (AC-26); `map-qa evaluate` rebuilds the same section from existing results. No cycles.
 
 | Module | Responsibility | Depends on |
 |---|---|---|
@@ -125,13 +126,14 @@ No file contains a base64 image or a secret value.
 | Command | Result | Exit code |
 |---|---|---|
 | `map-qa run --dry-run` | Source and location of each dataset and the maximum number of calls per tier; no data is read | 0 |
-| `map-qa run --model-mode off` (default) | Full run, everything without a human value → `pending_human` | 0 |
-| `map-qa run --model-mode cache` | Cache only; misses → `model_unavailable` → queue | 0 |
+| `map-qa run --model-mode off` (default) | Full run without reading the cache; every sign with a trusted link and without a human value → `pending_human` | 0 |
+| `map-qa run --model-mode cache` | Cache only, per tier; misses → `model_unavailable` → queue | 0 |
+| `map-qa run --model-mode live` without `OPENROUTER_API_KEY` | Configuration error naming the variable, before the confirmation prompt (PRD §4.7 item 5) | 2 |
 | `map-qa run --model-mode live --sample stage1 [--yes]` | Calls within limits; confirmation before the first one | 0, also when a tier's limit or budget is exhausted: the tier is skipped, signs continue down the cascade, and the report states which limit was reached (PRD §4.7) |
 | `map-qa evaluate` | Evaluation section from labels | 0 |
 | input, source, `review.csv` errors | One line naming the dataset, file, column, variable or row | 2 |
 
-Options: `--source`, `--source-<dataset>`, `--config`, `--out`, `--threshold`, `--max-requests-tier1/2`, `--max-cost-tier1/2`, `--review`. The names are fixed by a CLI contract test before implementation.
+Options: `--source`, `--source-<dataset>`, `--config`, `--out`, `--model-mode`, `--sample`, `--threshold`, `--max-requests-tier1/2`, `--max-cost-tier1/2`, `--review`, `--yes`, `--dry-run`. The names are fixed by a CLI contract test before implementation.
 
 Per PRD §4.7, a model error does not stop the run: the tier is skipped as `model_unavailable`, and the sign continues down the cascade.
 
@@ -174,7 +176,7 @@ Per PRD §4.7, a model error does not stop the run: the tier is skipped as `mode
 ### Results in files
 **Status:** Accepted
 **Context:** One analyst, 119 signs, manual editing of `review.csv`.
-**Decision:** CSV and Markdown in `reports/map-qa/`, JSON for the run manifest and the ledger.
+**Decision:** CSV and Markdown in `reports/map-qa/run/` (ignored by Git), JSON for the run manifest and the ledger.
 **Rejected:** a DuckDB database, because it cannot be reviewed with a diff or edited in a spreadsheet.
 **Consequences:** (+) readable without tools; (−) merging `review.csv` must be deterministic.
 **Review trigger:** several analysts working at the same time.
@@ -207,7 +209,7 @@ flowchart LR
     LLM --> OR2[(OpenRouter Chat Completions)]
     CAS --> CMP[compare + osm_speed]
     CMP --> EXP[export]
-    EXP --> OUT[(reports/map-qa)]
+    EXP --> OUT[(reports/map-qa/run)]
     OUT --> EV[evaluate]
     LAB[(signs/labels.csv)] --> EV
 ```
@@ -255,7 +257,7 @@ sequenceDiagram
 ### Principles
 
 1. Tests before code: test → expected Red for the right reason → minimum code → Green → refactoring while tests stay green.
-2. API mocks only from a saved, real capture (ADR-001 §5). Without a capture we test logic on parsed objects and do not invent the response shape.
+2. API mocks only from a saved, real capture (ADR-001 §5). Before any client, parser or mock is written, a real request is sent to the endpoint and its accepted request and full response are captured; the request format and the data structure come from that capture. Without a capture we test logic on parsed objects and do not invent the response shape. Mocks are allowed only in unit and integration tests. **Manual and E2E tests never use mocks**: they call the real endpoints (Jev, GPT-6 Luna, Databricks).
 3. Each stage ends with a real CLI run on the exercise files and a manual trace of one sign from crop to report row.
 4. The stage report lists separately: `uv sync`, discovery and test count with skips, CLI startup, manual check.
 
@@ -265,6 +267,8 @@ sequenceDiagram
 |---|---|---|---|
 | Unit | all dependencies | rules, parsing, configuration, review merging | pytest |
 | Integration | only the external LLM and Databricks, from capture | real exercise files, real DuckDB | pytest + `httpx.MockTransport` |
+
+Deliberate deviation from the repository `AGENTS.md` test table, which allows mocks only for the external LLM API in integration tests: Databricks is mocked too. Like the LLM, it is an external, shared and potentially paid service, and the same rule applies to it: mocks only from a real capture (ADR-002 §7).
 | E2E | none | real CLI, files, OpenRouter and Databricks | pytest with the `live` marker, skipped by default with a stated reason |
 
 ### Key scenarios (stage 0)

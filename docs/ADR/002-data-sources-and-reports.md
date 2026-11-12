@@ -91,7 +91,7 @@ Common requirements:
 ### Only the required columns and rows from Databricks
 **Status:** Accepted
 **Context:** `osm_roads` has 99 768 rows with WKB geometry, and INLINE has a 25 MiB limit. Each query may start the shared warehouse.
-**Decision:** One query per run, projecting the tag columns and filtering by the IDs from `nearest_osm`.
+**Decision:** Two statements per run: one `SELECT count(*)` for the AC-43 row-count check, and one projected read of the tag columns, filtered by the IDs from `nearest_osm`.
 **Rejected:** fetching the whole table with `EXTERNAL_LINKS`, because it is slower and requires link handling.
 **Consequences:** (+) small result, fast read; (−) phase 2 (geometry) will require `EXTERNAL_LINKS` or a spatial filter.
 **Review trigger:** phase 2.
@@ -158,7 +158,14 @@ sequenceDiagram
 | Review merge | unit | existing `review.csv` + new rows | people's entries unchanged | sign removed from input |
 | Escaping | unit | tag with `<script>` and `|` | text, not markup; table intact | zero candidates |
 
-The Databricks mock is built from a capture of a real `SELECT … LIMIT 5` query on `workspace.map_qa.osm_roads`, saved as in ADR-001 §5, without the token and host. Access was confirmed on 2026-11-12, but that capture is not saved yet. The count read printed only the parsed result, not the HTTP status, headers and body, so it is not a capture. It is saved in increment 9 of the plan.
+The Databricks mocks are built only from real captures, saved as in ADR-001 §5, without the token and host. Captures needed:
+
+1. `SELECT … LIMIT 5` on `workspace.map_qa.osm_roads`: response shape and typed `manifest.schema`.
+2. A parameterized read with `:id_n` markers: the parameter binding.
+3. The same read with `wait_timeout = 0s`: the `PENDING` POST response and the following GET polls up to `SUCCEEDED`.
+4. A deliberately failing `SELECT`, e.g. an unknown column: the `FAILED` shape with `error_code`.
+
+A response shape without a capture (for example `CANCELED` or the client timeout) is tested on parsed objects or skipped with the reason "no capture", never invented. Access was confirmed on 2026-11-12, but that capture is not saved yet. The count read printed only the parsed result, not the HTTP status, headers and body, so it is not a capture. It is saved in increment 9 of the plan.
 
 ### Technical acceptance criteria
 

@@ -165,6 +165,6 @@ flowchart TD
 ### Technical acceptance criteria
 
 - TAC-003-01: Every rule has `raw` equal to the source tag value byte for byte.
-- TAC-003-02: The count test from PRD §12 gives 13 / 18 / 7 / 7 when labels are substituted as readings (it checks the comparison logic, not model quality).
+- TAC-003-02: The count test from PRD §12 gives 13 / 18 / 5 / 9 when labels are substituted as readings (it checks the comparison logic, not model quality).
 - TAC-003-03 (phase 2): The number of Overture rule rows equals the sum of the `speed_limits` list lengths.
 - TAC-003-04 (phase 2): Recomputed distances for roads present in local OSM differ from `nearest_osm.csv` by at most 0.001 m.

@@ -2,9 +2,10 @@
 
 **Date:** 2026-11-12
 **Based on:** [PRD](PRD.md), [ADR-000](ADR/000-main-architecture.md), [ADR-001](ADR/001-decision-cascade.md), [ADR-002](ADR/002-data-sources-and-reports.md), [ADR-003](ADR/003-spatial-and-speed-normalization.md)
-**Branch:** `worktree-prototype`
+**Branch:** `map-app-implementation`
+**Execution plan:** [plans/implementation-plan.md](plans/implementation-plan.md)
 
-The plan splits the MVP into increments. Each increment is one TDD cycle (test → Red for the right reason → minimum code → Green → refactor), one commit, and a manual CLI check once the CLI exists. Increments 0–7 need no network or keys and together complete **stage 0** of PRD §12. Increments 9–10 wait for the prerequisites under "Blockers".
+The plan splits the MVP into increments. Each increment is one TDD cycle (test → Red for the right reason → minimum code → Green → refactor), one commit, and a manual CLI check once the CLI exists. Increments 0–7 need no network or keys and together complete **stage 0 locally** (PRD §12); increment 9 completes stage 0 with OSM roads from Databricks (AC-39). Increments 9–10 wait for the prerequisites under "Blockers".
 
 ---
 
@@ -34,7 +35,7 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 
 ### 2. Local input reading — AC-01, AC-02, AC-05, AC-43
 - `local` adapter (DuckDB, explicit types, identifiers as text, empty → NULL) and the shared table contract with source metadata.
-- `inputs`: column and duplicate validation, crop SHA-256, row counts vs `sources.json` → warning.
+- `inputs`: column and duplicate validation, crop SHA-256, `osm_roads` row count vs `sources.json` → warning (AC-43; the sign files have no snapshot count).
 - Input error → one line, exit code 2, no report.
 - Integration test on the real files: 119 signs; input hashes before = after.
 
@@ -46,7 +47,7 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 - `review`: validation of human values and verdicts (error → row and value, file unchanged), deterministic merge by `row_id`, human entries never overwritten.
 
 ### 5. Cascade in `off` and `cache` modes + ledger — AC-16, AC-17, AC-30
-- `cascade`: human value → cache → (mode) → queue. Model clients as an interface with no network implementation yet.
+- `cascade`: human value → mode → per-tier cache (modes `cache`/`live` only; `off` never reads the cache) → queue. Model clients as an interface with no network implementation yet.
 - `ledger`: cache in `app/.cache/map-qa/` (key: image SHA-256 + model + `question_version`), persistent counters.
 - The test transport raises on every request (TAC-000-02).
 
@@ -58,13 +59,12 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 ### 7. Evaluation — AC-32…AC-36
 - `evaluate`: the only reader of `labels.csv` (architecture test TAC-000-05); per-tier metrics with denominators; Mapillary detector baseline; threshold recalculation from stored distributions.
 - Test TAC-003-02: labels substituted as readings → 13 `match` / 18 `mismatch` / 5 `map_missing` / 9 `not_comparable` (2 implicit-limit roads, decision of 2026-11-12).
-- Samples `app/samples/stage1.txt` (5) and `stage2.txt` (20) per PRD §12, selected by a one-off script. Check whether `reports/map-qa/pilot-manifest.csv` from `main` (25 rows) meets the PRD §12 criteria; if not, select again.
-
+- Samples `app/samples/stage1.txt` (5) and `stage2.txt` (20) per PRD §12, selected by a one-off script.
 ### 8. (buffer) Cleanup and review
 - `/code-review` of the whole change; update `app/README.md` with actual usage.
 
 ### 9. Databricks — AC-39, AC-41, AC-42 (needs B3)
-- Capture a real `SELECT … LIMIT 5` first, then build the mock from the capture.
+- First save the real captures listed in ADR-002 §7 (LIMIT 5, parameterized read, `wait_timeout = 0s` polling, deliberate FAILED), then build the mocks from them.
 - REST adapter: `:id_n` markers, `SELECT` guard, polling every 2 s up to 180 s, no repeated POST, error categories.
 - E2E: `osm_roads` from Databricks = local result (TAC-002-01).
 
@@ -77,5 +77,5 @@ The plan splits the MVP into increments. Each increment is one TDD cycle (test �
 
 ## Open points to clarify in ADR-001
 
-1. **Tier-2 cache in `cache` mode:** when tier 1 is cached with p < 0.80, does the cascade use a cached tier-2 answer? Proposal: yes, the cache is checked per tier; no entry → `model_unavailable`.
-2. **CLI option names:** ADR-000 §6 does not list `--model-mode`, `--sample`, `--yes`, `--dry-run` among the options, although its table uses them. The contract test in increment 1 will fix them.
+1. ~~Tier-2 cache in `cache` mode~~: **closed 2026-11-12.** The cache is checked per tier; a miss counts as `model_unavailable`; `off` never reads the cache (ADR-001 §5, PRD §4.5).
+2. ~~CLI option names~~: **closed 2026-11-12.** ADR-000 §6 now lists `--model-mode`, `--sample`, `--yes` and `--dry-run`. The contract test in increment 1 fixes them.

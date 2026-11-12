@@ -57,7 +57,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 ### 4.4 Escalation chain for reading a sign crop
 
 1. **Human value:** if the analyst already entered a value for this sign, it is used with `tier=human`; no model is called.
-2. **Cache:** if an answer for the same image, model and question version is cached, it is used; no call is made.
+2. **Cache (modes `cache` and `live` only):** before each tier, if an answer from that tier's model for the same image and question version is cached, it is used instead of a call and passes the same tier rule.
 3. **Tier 1 — decision model:** the system sends the crop and a neutral question with a closed answer set (section 11). The model returns a probability for each answer.
    - Top answer is a value or `none` with probability ≥ the confidence threshold → accepted, `tier=decision_model`.
    - Probability below the threshold, top answer `unreadable`, or call failure (`model_unavailable`) → tier 2.
@@ -69,8 +69,8 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 
 ### 4.5 Model modes
 
-1. `off` (default): no model is called. Every sign without a human value goes to the manual queue. This tests the whole workflow at zero cost.
-2. `cache`: only cached answers are used. Signs without a cached answer go down the chain as `model_unavailable` and end in the manual queue.
+1. `off` (default): no model is called and the answer cache is not read. Every sign without a human value goes to the manual queue. This tests the whole workflow at zero cost.
+2. `cache`: only cached answers are used, checked per tier, and a cached answer passes the same tier rule as a fresh one. A tier without a cached answer counts as `model_unavailable`, and the sign goes down the chain and ends in the manual queue.
 3. `live`: tiers are called within their request and cost limits. Before the first paid call, the command prints the number of crops to send and the limits, and asks for confirmation unless a confirmation option is given.
 4. A sample option restricts the run to a listed set of sign ids (for example the evaluation sample in section 12).
 
@@ -90,6 +90,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 2. **Databricks unavailable:** missing variable, authentication error, permission error, failed query or timeout → the run stops before any model call with the dataset and error category, and exits non-zero. A pending query is polled by its identifier until the timeout and never resubmitted. There is no silent fallback to local files.
 3. **Model failure or budget exhausted:** the failing tier is skipped as `model_unavailable` for the affected signs, which continue down the chain. When a tier's limit is reached, it is not called again in the run. The run completes.
 4. **Invalid review CSV:** a verdict or human value outside its allowed set stops the run, prints the row and value, and leaves the file unchanged.
+5. **Missing model key:** in mode `live`, a missing `OPENROUTER_API_KEY` is a configuration error, not a model failure. It is checked before the confirmation prompt, stops the run with the variable name and exits non-zero. Failures during calls follow item 3.
 
 ---
 
@@ -133,7 +134,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 - **AC-14:** The confidence threshold, request limit, cost limit and timeout of each tier are configurable and printed in the report header. In the MVP evaluation, the threshold is 0.80 and is not changed after the first evaluation call.
 - **AC-15:** Every attempt, including failed ones, counts against its tier's request limit. No call is retried automatically. When a limit is reached, the tier is not called again in the run, and the summary states which limit was reached and how many signs were affected.
 - **AC-16:** A cached answer for the same image hash, model identifier and question version is reused without a call; the summary shows cache hits per tier.
-- **AC-17:** In mode `off`, no model is called and every sign without a human value is `pending_human`. In mode `cache`, no network call to a model is made.
+- **AC-17:** In mode `off`, no model is called, the cache is not read, and every sign with a trusted link and without a human value is `pending_human`. In mode `cache`, no network call to a model is made.
 - **AC-18:** In mode `live`, the command shows the number of crops and the limits and makes no call until confirmed.
 
 ### Comparison with the map
@@ -143,7 +144,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 - **AC-21:** `mismatch`: as AC-20, but the values differ.
 - **AC-22:** `map_missing`: the sign value is numeric, the road has none of the four OSM speed tags and no implicit-limit tag (AC-23).
 - **AC-23:** `not_comparable`: the sign value is `none`, or the OSM speed is not a number in km/h (for example `PL:urban`, `none`, `50;70`, `30 mph`), or a directional or conditional speed tag is present, or the road has none of the four speed tags but has an implicit-limit tag: `maxspeed:type`, `source:maxspeed` or `zone:maxspeed` with a country-code value such as `PL:urban`, `PL:rural` or `PL:zone30`. The statutory limit is not derived, and a conditional tag is not evaluated against the photo time. The raw values are shown.
-- **AC-24:** The outcome is `pending_human` while no value has been accepted for the sign.
+- **AC-24:** The outcome is `pending_human` while the sign-to-road link is trusted and no value has been accepted for the sign. `abstain` (AC-06) takes precedence: an abstained sign keeps `abstain` whether or not it has a value.
 
 ### Outputs and review
 
@@ -171,7 +172,7 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 - **AC-40:** A configuration file containing a credential value is rejected with an error naming the field, without printing the value.
 - **AC-41:** Against Databricks, the tool submits only `SELECT` statements and writes them to the run log.
 - **AC-42:** A missing host, token or warehouse variable stops the run before any query, naming the missing variable.
-- **AC-43:** A dataset row count that differs from the snapshot count shows a warning with both numbers; the run continues.
+- **AC-43:** For each dataset with a snapshot row count in `sources.json` (in the MVP: `osm_roads`), a row count that differs from it shows a warning with both numbers; the run continues.
 - **AC-44:** The dry-run option prints the resolved source and location of each dataset and the number of model calls each tier would make at most, and exits with code 0 without reading data or calling a model.
 
 ---
@@ -196,11 +197,11 @@ The nearest road to a sign is also not always the road the sign applies to. In t
 
 ### Business
 
-- All local input files are read-only. Outputs go to `reports/map-qa/`; the answer cache goes to an ignored data directory.
+- All local input files are read-only. Run outputs go to `reports/map-qa/run/`, which is ignored by Git, so the analyst's `review.csv` is not versioned and must be kept or backed up by the analyst. The answer cache goes to an ignored data directory. Committed analysis such as `reports/map-qa/profile.md` stays in `reports/map-qa/`.
 - Licences and attribution must be preserved: OSM data under ODbL 1.0, photos under CC BY-SA 4.0 with author credit.
 - The sign labels were produced by AI agents and are not fully human-verified; they are a working reference, not ground truth. Each disagreement needs a human look at the crop.
 - Paid model calls need a request and cost budget allocated by the course trainer before the first call. API keys and Databricks tokens are read only from environment variables and are never printed or logged.
-- The shared Databricks token has the `sql` scope; read-only behaviour is enforced by the tool. Queries can start a shared warehouse; each dataset is read once per run.
+- The shared Databricks token has the `sql` scope; read-only behaviour is enforced by the tool. Queries can start a shared warehouse; each dataset is read once per run (for a Databricks dataset: one row-count query and one projected read).
 
 ### Functional
 
@@ -249,6 +250,7 @@ The MVP has no graphical interface.
 ### 9.3 Review CSV
 
 - Columns: row id, row type (`queue` or `candidate`), sign id, OSM way id, tier-1 answer, tier-2 answer, human value (empty), outcome, verdict (empty), comment (empty).
+- `queue` rows cover every sign without an accepted value, including abstained signs (outcome `abstain`): their value still counts for evaluation (AC-07), but they are not compared with the map.
 
 ---
 
@@ -266,27 +268,27 @@ flowchart TD
     V -- Yes --> L[For each of 119 signs]
     L --> H{Human value entered?}
     H -- Yes --> VAL[Value, tier=human]
-    H -- No --> C{Cached answer?}
-    C -- Yes --> VAL2[Cached value]
-    C -- No --> M{Model mode}
-    M -- off/cache --> Q[Manual queue: pending_human]
-    M -- live --> T1[Tier 1 decision model]
+    H -- No --> M{Model mode}
+    M -- off --> Q[No accepted value: manual queue]
+    M -- "cache / live" --> T1[Tier 1: cached answer, or a call in live]
     T1 --> T1a{Value or none, p >= 0.80?}
     T1a -- Yes --> VAL3[Value, tier=decision_model]
-    T1a -- "No / unreadable / error" --> T2[Tier 2 LLM, medium reasoning]
+    T1a -- "No / unreadable / miss / error" --> T2[Tier 2: cached answer, or a call in live]
     T2 --> T2a{Value or none?}
     T2a -- Yes --> VAL4[Value, tier=llm]
-    T2a -- "No / unreadable / error" --> Q
+    T2a -- "No / unreadable / miss / error" --> Q
     VAL --> K{Link trusted and road in Kraków OSM?}
-    VAL2 --> K
     VAL3 --> K
     VAL4 --> K
+    Q --> K
     K -- No --> AB[abstain]
-    K -- Yes --> CMP[Compare with OSM speed tags]
+    K -- Yes --> HV{Accepted value?}
+    HV -- No --> PH[pending_human]
+    HV -- Yes --> CMP[Compare with OSM speed tags]
     CMP --> O[match / mismatch / map_missing / not_comparable]
     O --> W[Write Markdown, results CSV, review CSV, evaluation]
     AB --> W
-    Q --> W
+    PH --> W
     W --> RV[Analyst enters values and verdicts]
     RV --> A
 ```
@@ -320,7 +322,7 @@ One question per crop, in English, neutral, with the closed answer set:
 | `map_missing` | Sign value numeric; road has no OSM speed tag and no implicit-limit tag. Candidate. |
 | `not_comparable` | Sign `none`, OSM speed that is not a number in km/h, directional/conditional speed tags, or only an implicit-limit tag (e.g. `maxspeed:type=PL:rural`). |
 | `abstain` | Sign-to-road link not trusted, road not in the dataset, or sign outside Kraków. |
-| `pending_human` | No value accepted yet; in the manual queue. |
+| `pending_human` | Link trusted, no value accepted yet; in the manual queue. |
 
 `unreadable` is a model's answer; `model_unavailable` is a call failure. Neither is converted into a value or into `none`.
 

@@ -104,11 +104,16 @@ The MVP calls no other paid models. `--dry-run` (AC-44) shows at most 25 + 10 ca
 
 - Key: SHA-256 of the image + model identifier + `question_version`. The threshold is not part of the key (AC-16).
 - Value: the full raw response, `usage`, time, HTTP status. Errors are not cached.
+- Use by mode (decided 2026-11-12; closes PLAN open point 1):
+  - `off`: the cache is not read (AC-17).
+  - `cache` and `live`: the cache is checked **per tier**, before that tier's call. A cached answer passes the same tier rule as a fresh one.
+  - A miss in `cache` mode counts as `model_unavailable` for that tier, and the sign moves on.
 
 ### Capture for mocks
 
 - The first real request to each model, counted against the limit, saves a capture in `app/tests/fixtures/captures/`. The capture contains: date, endpoint, model, application version, status, response headers without authentication headers and account identifiers, and the full unchanged response body. In the request body the image is replaced with a `<image sha256=…>` marker.
-- Integration mocks read only these files. Without a capture, the parser tests for that endpoint are skipped with the reason "no capture".
+- The capture comes **first**: the client's request format and the parser's data structure are taken from the accepted request and the real response, not from documentation alone. A rejected request is fixed and resent within the limit.
+- Unit and integration mocks read only these files. Without a capture, the parser tests for that endpoint are skipped with the reason "no capture". Manual and E2E tests call the real endpoints and never use mocks.
 
 ---
 
@@ -172,18 +177,24 @@ The MVP calls no other paid models. `--dry-run` (AC-44) shows at most 25 + 10 ca
 stateDiagram-v2
     [*] --> Human
     Human --> Accepted_human: value in review.csv
-    Human --> Cache: no human value
-    Cache --> Rule1: tier 1 answer in cache
-    Cache --> Mode: cache miss
-    Mode --> Queue: mode off or cache
-    Mode --> Tier1: mode live
-    Tier1 --> Tier2: limit exhausted or error (model_unavailable)
+    Human --> Mode: no human value
+    Mode --> Queue: mode off (cache not read)
+    Mode --> Cache1: mode cache or live
+    Cache1 --> Rule1: tier 1 answer in cache
+    Cache1 --> Tier1: miss, mode live
+    Cache1 --> Cache2: miss, mode cache (model_unavailable)
+    Tier1 --> Cache2: limit exhausted or error (model_unavailable)
     Tier1 --> Rule1: answer
     Rule1 --> Accepted_t1: p >= 0.80, value or none
-    Rule1 --> Tier2: otherwise
-    Tier2 --> Accepted_t2: value or none
-    Tier2 --> Queue: unreadable, outside set, error, limit
-    Queue --> [*]: pending_human
+    Rule1 --> Cache2: otherwise
+    Cache2 --> Rule2: tier 2 answer in cache
+    Cache2 --> Tier2: miss, mode live
+    Cache2 --> Queue: miss, mode cache (model_unavailable)
+    Tier2 --> Rule2: answer
+    Tier2 --> Queue: error, limit
+    Rule2 --> Accepted_t2: value or none
+    Rule2 --> Queue: unreadable, outside set
+    Queue --> [*]: no accepted value (pending_human, or abstain if the link is untrusted)
     Accepted_human --> [*]
     Accepted_t1 --> [*]
     Accepted_t2 --> [*]
@@ -238,7 +249,7 @@ sequenceDiagram
 | Cache and resume | integration | live run (mock from capture), then cache | second run: 0 requests, same results (AC-03) | threshold change: recomputation without requests |
 | Service error | integration | 429, timeout | `model_unavailable`, sign moves on, transport counts 1 request | error in both tiers → queue |
 
-E2E `live` only after the budget is granted: first one capture request per model, then stage 1 (5 signs, Jev + tier 2), then stage 2 and stage 3 in `cache` mode.
+E2E `live` only after the budget is granted. The capture of each model is the **first stage-1 request** of that model, not an extra request. Then stage 1 continues (5 signs in total, Jev + tier 2), followed by stage 2, and stage 3 in `cache` mode. Tier-1 requests therefore stay at 5 + 20 = 25.
 
 ### Technical acceptance criteria
 
