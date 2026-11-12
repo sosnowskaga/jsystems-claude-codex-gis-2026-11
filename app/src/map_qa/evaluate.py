@@ -14,6 +14,16 @@ from map_qa.models import SignReading
 from map_qa.sources.local import LocalRoadsSource
 
 _DETECTOR_SPEED = re.compile(r"^regulatory--maximum-speed-limit-(\d+)--")
+# AC-45: how the models accepted the request, from the captures in tests/fixtures/captures (ADR-001 §4a).
+_REQUEST_DIFFERENCES = (
+    "Różnice w akceptacji żądania (z capture'ów, ADR-001 §4a):",
+    "",
+    "- Oba modele decyzyjne przyjęły to samo pytanie `choice` z 24 etykietami i ten sam `state` (tekst + obraz).",
+    "- `typesafe/jev-1.14` odrzucił oryginalny wycinek 135×141 px i wersję 274×287 px (`400 Invalid image dimensions`); "
+    "przyjął obraz 512×512 px. `openai/gpt-6-luna-decisions` przyjął też oryginalny mały JPEG.",
+    "- Dlatego oba modele dostają ten sam obraz PNG przeskalowany do 512–1568 px na bok.",
+    "- Oba modele działają jako BYOK: `usage.cost = 0`, koszt w `cost_details.upstream_inference_cost`.",
+)
 _THRESHOLDS = (0.50, 0.60, 0.70, 0.80, 0.90, 0.95)
 _ACCEPTED_TIERS = {models.TIER_DECISION_MODEL, models.TIER_LLM}
 
@@ -118,13 +128,13 @@ def evaluation_markdown(out_dir: Path, settings) -> str:
         correct, false, _ = _metric_counts(set(accepted), accepted, labels, measurable, numeric, negatives)
         neg_sent = {a["photo_id"] for a in exp_answers if a["photo_id"] in negatives}
         neg_handled = sum(a.get("answer") == "none" or a.get("status") != "answered" or a["photo_id"] not in accepted for a in exp_answers if a["photo_id"] in neg_sent)
-        latencies = [a["latency_ms"] for a in exp_answers if not a.get("from_cache") and isinstance(a.get("latency_ms"), (int, float))]
+        latencies = [a["latency_ms"] for a in exp_answers if isinstance(a.get("latency_ms"), (int, float))]
         costs = sum(a.get("cost_usd") or 0 for a in exp_answers)
         sent = len(exp_answers)
         lines.append(f"| {exp_id} | {exp.get('tiers', {}).get('tier1', {}).get('model', exp_answers[0].get('model', ''))} | {sum(a.get('status') == 'answered' for a in exp_answers)}/{sent} | {len(accepted)}/{sent} | {_fraction(correct, sum(pid in numeric for pid in accepted))} | {false}/{sum(pid in measurable for pid in accepted)} | {neg_handled}/{len(neg_sent)} | {sum(a.get('answer') == 'unreadable' for a in exp_answers)}/{sent} | {sum(a.get('status') == 'model_unavailable' for a in exp_answers)}/{sent} | {statistics.median(latencies) if latencies else '—'} | {max(latencies) if latencies else '—'} | {costs:.6f} | {f'{costs/len(accepted):.6f} USD' if accepted else '—'} |")
     if not experiments:
         lines.append("0 pozycji")
-    lines += ["", "Różnice w akceptacji żądania: zob. tests/fixtures/captures/", "", "### Kontrola logiki porównania (etykiety jako odczyty)", ""]
+    lines += ["", *_REQUEST_DIFFERENCES, "", "### Kontrola logiki porównania (etykiety jako odczyty)", ""]
     required = ("signs/nearest_osm.csv", "sources.json", "osm_roads.parquet")
     if all((settings.data_dir / path).is_file() for path in required):
         lines += ["| Wynik | Liczba |", "|---|---:|"]

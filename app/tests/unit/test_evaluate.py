@@ -118,3 +118,14 @@ def test_chain_counts_signs_not_answers(tmp_path):
     row = _row(evaluation_markdown(out, settings), "łańcuch")
     assert row[1] == "4/4"  # signs sent to the chain
     assert row[7] == "1/1"  # negative b handled (escalated to the queue), counted once
+
+
+def test_ac45_latency_includes_answers_replayed_from_cache(tmp_path):
+    """A cached answer keeps the latency measured when it was requested (ADR-004 §8), so stage 3 keeps AC-45 latency."""
+    out, settings = _fixture(tmp_path)
+    cached = {"experiment_id": "c", "threshold": 0.8, "tiers": {"tier1": {"model": "jev"}}, "answers": [
+        {"photo_id": "a", "tier": 1, "model": "jev", "status": "answered", "answer": "50", "probabilities": {"50": 0.9},
+         "from_cache": True, "latency_ms": 250}]}
+    (out / "experiments" / "c.json").write_text(json.dumps(cached), encoding="utf-8")
+    row = _row(evaluation_markdown(out, settings), "c")
+    assert row[9] == "250" and row[10] == "250"
