@@ -1,0 +1,128 @@
+{
+  "captured_at": "2026-11-12T15:16:26+00:00",
+  "target": "Databricks SQL Statement Execution API 2.0, workspace host omitted",
+  "httpx": "0.28.1",
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/2.0/sql/statements",
+        "body": {
+          "warehouse_id": "97c455ee6fb1fcb9",
+          "statement": "SELECT osm_id, highway, maxspeed, tags FROM workspace.map_qa.osm_roads ORDER BY osm_id LIMIT 5",
+          "wait_timeout": "10s",
+          "on_wait_timeout": "CONTINUE",
+          "disposition": "INLINE",
+          "format": "JSON_ARRAY"
+        }
+      },
+      "status": 200,
+      "headers": {
+        "date": "Thu, 12 Nov 2026 15:16:30 GMT",
+        "content-type": "application/json"
+      },
+      "removed_header_names": [
+        "access-control-allow-headers",
+        "access-control-allow-origin",
+        "alt-svc",
+        "cache-control",
+        "content-encoding",
+        "expires",
+        "pragma",
+        "server",
+        "server-timing",
+        "strict-transport-security",
+        "transfer-encoding",
+        "vary",
+        "x-content-type-options",
+        "x-databricks-org-id",
+        "x-request-id"
+      ],
+      "body": {
+        "statement_id": "01f1deac-090b-12a4-9d2a-4a1cf176287d",
+        "status": {
+          "state": "SUCCEEDED"
+        },
+        "manifest": {
+          "format": "JSON_ARRAY",
+          "schema": {
+            "column_count": 4,
+            "columns": [
+              {
+                "name": "osm_id",
+                "type_text": "BIGINT",
+                "type_name": "LONG",
+                "position": 0
+              },
+              {
+                "name": "highway",
+                "type_text": "STRING",
+                "type_name": "STRING",
+                "position": 1
+              },
+              {
+                "name": "maxspeed",
+                "type_text": "STRING",
+                "type_name": "STRING",
+                "position": 2
+              },
+              {
+                "name": "tags",
+                "type_text": "STRING",
+                "type_name": "STRING",
+                "position": 3
+              }
+            ]
+          },
+          "total_chunk_count": 1,
+          "chunks": [
+            {
+              "chunk_index": 0,
+              "row_offset": 0,
+              "row_count": 5
+            }
+          ],
+          "total_row_count": 5,
+          "truncated": false
+        },
+        "result": {
+          "chunk_index": 0,
+          "row_offset": 0,
+          "row_count": 5,
+          "data_array": [
+            [
+              "2954554",
+              "residential",
+              "40",
+              "{\"cycleway:both\": \"no\", \"highway\": \"residential\", \"lane_markings\": \"no\", \"lit\": \"yes\", \"maxspeed\": \"40\", \"name\": \"Ignacego Mościckiego\", \"sidewalk\": \"separate\", \"smoothness\": \"excellent\", \"surface\": \"asphalt\", \"width\": \"5.5\"}"
+            ],
+            [
+              "2954556",
+              "tertiary",
+              "50",
+              "{\"check_date:cycleway\": \"2026-01-10\", \"cycleway:both\": \"no\", \"highway\": \"tertiary\", \"lanes\": \"2\", \"lit\": \"yes\", \"maxspeed\": \"50\", \"name\": \"Stefana Żeromskiego\", \"sidewalk\": \"separate\", \"smoothness\": \"excellent\", \"source:maxspeed\": \"PL:urban\", \"surface\": \"asphalt\"}"
+            ],
+            [
+              "2954557",
+              "residential",
+              "30",
+              "{\"highway\": \"residential\", \"lit\": \"yes\", \"maxspeed\": \"30\", \"noname\": \"yes\", \"oneway\": \"no\", \"sidewalk:both\": \"separate\", \"smoothness\": \"intermediate\", \"source:maxspeed\": \"PL:zone30\", \"surface\": \"asphalt\", \"width\": \"3\"}"
+            ],
+            [
+              "2954558",
+              "residential",
+              "30",
+              "{\"highway\": \"residential\", \"lit\": \"yes\", \"maxspeed\": \"30\", \"noname\": \"yes\", \"oneway\": \"no\", \"sidewalk:left\": \"no\", \"sidewalk:right\": \"separate\", \"smoothness\": \"good\", \"source:maxspeed\": \"PL:zone30\", \"surface\": \"asphalt\", \"width\": \"3.1\"}"
+            ],
+            [
+              "4576181",
+              "motorway",
+              "120",
+              "{\"highway\": \"motorway\", \"highway:category:pl\": \"1\", \"highway:class:pl\": \"S\", \"int_ref\": \"E 77\", \"lanes\": \"2\", \"maxaxleload\": \"11.5\", \"maxspeed\": \"120\", \"maxspeed:bus\": \"80\", \"maxspeed:hgv\": \"80\", \"maxspeed:trailer\": \"80\", \"old_ref\": \"S7;A41\", \"oneway\": \"yes\", \"ref\": \"S52;7\", \"source:maxaxleload\": \"Dz.U. 2011 nr 222 poz. 1321 Art. 2 pkt. 11\", \"source:maxspeed\": \"PL:expressway\", \"surface\": \"asphalt\", \"toll:bus\": \"yes\", \"toll:hgv\": \"yes\"}"
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}

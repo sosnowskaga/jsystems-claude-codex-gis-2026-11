@@ -1,0 +1,111 @@
+"""In-process off-mode run on the real files (TAC-000-02, AC-17, AC-44, PRD §4.7 item 5)."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from conftest import run_cli
+from map_qa.config import resolve_settings
+from map_qa.pipeline import RunOptions, execute
+
+
+def _settings(env: dict[str, str], mode: str | None = None):
+    return resolve_settings(config=None, source=None, source_osm_roads=None, model_mode=mode, env=env)
+
+
+def test_off_run_makes_no_request_and_never_touches_the_cache(tmp_path: Path, no_network):
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    sentinel = cache / "answers"  # a cache folder that must not be read or created in off mode
+    summary = execute(_settings({}), RunOptions(out=tmp_path / "run", cache_dir=cache, env={}))
+    assert len(summary.ctx.results) == 119
+    assert not sentinel.exists()
+    assert list(cache.iterdir()) == []
+    stats = summary.ctx.tier_stats
+    assert stats["tier1"].requests == 0 and stats["tier2"].requests == 0
+    report = summary.paths["report"].read_text(encoding="utf-8")
+    assert "## Ewaluacja\n\n0 pozycji" in report
+
+
+def test_untrusted_link_with_human_value_stays_abstain_and_keeps_queue_row(tmp_path: Path, no_network):
+    out = tmp_path / "run"
+    execute(_settings({}), RunOptions(out=out, env={}))
+    review = (out / "review.csv").read_text(encoding="utf-8").splitlines()
+    target = "mapillary_1109576507471869:queue"
+    idx = next(i for i, line in enumerate(review) if line.startswith(target))
+    cols = review[idx].split(",")
+    cols[6] = "50"
+    review[idx] = ",".join(cols)
+    (out / "review.csv").write_text("\n".join(review) + "\n", encoding="utf-8")
+    summary = execute(_settings({}), RunOptions(out=out, env={}))
+    result = next(r for r in summary.ctx.results if r.sign.photo_id == "mapillary_1109576507471869")
+    assert result.comparison.outcome == "abstain"
+    assert result.reading.tier == "human"
+    assert target in (out / "review.csv").read_text(encoding="utf-8")
+
+
+def test_sample_restricts_the_run(tmp_path: Path, no_network):
+    ids = "mapillary_1029602998981114,mapillary_1071696194278486"
+    summary = execute(_settings({}), RunOptions(out=tmp_path / "run", sample=ids, env={}))
+    assert sorted(r.sign.photo_id for r in summary.ctx.results) == sorted(ids.split(","))
+
+
+def test_unknown_sample_id_exits_2(tmp_path: Path, no_network_env):
+    result = run_cli(["run", "--out", str(tmp_path), "--sample", "not_a_photo"], env=no_network_env)
+    assert result.returncode == 2
+    assert "not_a_photo" in result.stderr
+
+
+def test_live_mode_without_key_exits_2_before_the_prompt(tmp_path: Path, no_network_env):
+    env = {k: v for k, v in no_network_env.items() if k != "OPENROUTER_API_KEY"}
+    result = run_cli(["run", "--model-mode", "live", "--out", str(tmp_path)], env=env)
+    assert result.returncode == 2
+    assert "OPENROUTER_API_KEY" in result.stderr
+    assert "Wysłać żądania" not in result.stdout  # PRD §4.7 item 5: before the confirmation
+    assert not (tmp_path / "report.md").exists()
+
+
+def test_live_mode_shows_crops_and_limits_and_sends_nothing_until_confirmed(tmp_path: Path, no_network_env):
+    """AC-18: the prompt lists crops and limits; a declined prompt sends no request (exit 1)."""
+    env = dict(no_network_env, OPENROUTER_API_KEY="test-key-value")
+    result = run_cli(
+        ["run", "--model-mode", "live", "--sample", "stage1", "--out", str(tmp_path), "--cache-dir", str(tmp_path / "c")],
+        env=env,
+        input_text="n\n",
+    )
+    assert result.returncode == 1, result.stderr
+    assert "co najwyżej 5 wycinków" in result.stdout
+    assert "limit 25 żądań" in result.stdout and "limit 10 żądań" in result.stdout
+    assert "NetworkBlocked" not in result.stderr
+    assert "test-key-value" not in result.stdout + result.stderr
+    assert not (tmp_path / "report.md").exists()
+    assert not (tmp_path / "c" / "ledger.json").exists()
+
+
+def test_kept_candidate_row_is_refreshed_when_the_outcome_changes(tmp_path: Path, no_network):
+    """Review finding (ADR-004 §5): machine columns of kept rows follow the current run."""
+    import csv
+
+    out = tmp_path / "run"
+    review = out / "review.csv"
+
+    def set_human(value: str) -> None:
+        rows = list(csv.DictReader(review.open(encoding="utf-8", newline="")))
+        for row in rows:
+            if row["row_id"] == "mapillary_1035052394661534:queue":
+                row["human_value"] = value
+        with review.open("w", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]), lineterminator="\n")
+            writer.writeheader()
+            writer.writerows(rows)
+
+    execute(_settings({}), RunOptions(out=out, env={}))
+    set_human("70")  # maxspeed=60 -> mismatch, candidate row added
+    execute(_settings({}), RunOptions(out=out, env={}))
+    set_human("60")  # now a match: the kept candidate row must not say mismatch any more
+    execute(_settings({}), RunOptions(out=out, env={}))
+    rows = {r["row_id"]: r for r in csv.DictReader(review.open(encoding="utf-8", newline=""))}
+    assert rows["mapillary_1035052394661534:candidate"]["outcome"] == "match"
+    assert rows["mapillary_1035052394661534:queue"]["outcome"] == "match"

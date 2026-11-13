@@ -12,11 +12,19 @@ build/
 skills-lock.json
 __pycache__/
 *.pyc
+.venv/
+.pytest_cache/
+app/.cache/
 .playwright-cli
 
 # Private agent briefs and Java build artifacts
-.agent-briefs/
+.agent-briefs/logs/
 **/target/
 *.class
 /.idea
 /.claude/worktrees
+
+# Map QA run outputs (review.csv is not versioned, ADR-000 §3)
+reports/map-qa/run/
+reports/map-qa/run-*/
+.tmp/

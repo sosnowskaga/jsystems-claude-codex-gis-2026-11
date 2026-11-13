@@ -1,0 +1,168 @@
+{
+  "captured_at": "2026-11-12T15:16:26+00:00",
+  "target": "Databricks SQL Statement Execution API 2.0, workspace host omitted",
+  "httpx": "0.28.1",
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/2.0/sql/statements",
+        "body": {
+          "warehouse_id": "97c455ee6fb1fcb9",
+          "statement": "SELECT osm_id, highway, maxspeed, tags FROM workspace.map_qa.osm_roads WHERE osm_id IN (:id_0, :id_1, :id_2)",
+          "wait_timeout": "0s",
+          "on_wait_timeout": "CONTINUE",
+          "disposition": "INLINE",
+          "format": "JSON_ARRAY",
+          "parameters": [
+            {
+              "name": "id_0",
+              "value": "187014751",
+              "type": "BIGINT"
+            },
+            {
+              "name": "id_1",
+              "value": "557114409",
+              "type": "BIGINT"
+            },
+            {
+              "name": "id_2",
+              "value": "1266239200",
+              "type": "BIGINT"
+            }
+          ]
+        }
+      },
+      "status": 200,
+      "headers": {
+        "date": "Thu, 12 Nov 2026 15:16:31 GMT",
+        "content-type": "application/json"
+      },
+      "removed_header_names": [
+        "access-control-allow-headers",
+        "access-control-allow-origin",
+        "alt-svc",
+        "cache-control",
+        "content-encoding",
+        "expires",
+        "pragma",
+        "server",
+        "server-timing",
+        "strict-transport-security",
+        "transfer-encoding",
+        "vary",
+        "x-content-type-options",
+        "x-databricks-org-id",
+        "x-request-id"
+      ],
+      "body": {
+        "statement_id": "01f1deac-0a65-1ad1-9341-21cf87a8ea6a",
+        "status": {
+          "state": "PENDING"
+        }
+      }
+    },
+    {
+      "request": {
+        "method": "GET",
+        "path": "/api/2.0/sql/statements/01f1deac-0a65-1ad1-9341-21cf87a8ea6a",
+        "body": null
+      },
+      "status": 200,
+      "headers": {
+        "date": "Thu, 12 Nov 2026 15:16:33 GMT",
+        "content-type": "application/json"
+      },
+      "removed_header_names": [
+        "access-control-allow-headers",
+        "access-control-allow-origin",
+        "alt-svc",
+        "cache-control",
+        "content-encoding",
+        "expires",
+        "pragma",
+        "server",
+        "server-timing",
+        "strict-transport-security",
+        "transfer-encoding",
+        "vary",
+        "x-content-type-options",
+        "x-databricks-org-id",
+        "x-request-id"
+      ],
+      "body": {
+        "statement_id": "01f1deac-0a65-1ad1-9341-21cf87a8ea6a",
+        "status": {
+          "state": "SUCCEEDED"
+        },
+        "manifest": {
+          "format": "JSON_ARRAY",
+          "schema": {
+            "column_count": 4,
+            "columns": [
+              {
+                "name": "osm_id",
+                "type_text": "BIGINT",
+                "type_name": "LONG",
+                "position": 0
+              },
+              {
+                "name": "highway",
+                "type_text": "STRING",
+                "type_name": "STRING",
+                "position": 1
+              },
+              {
+                "name": "maxspeed",
+                "type_text": "STRING",
+                "type_name": "STRING",
+                "position": 2
+              },
+              {
+                "name": "tags",
+                "type_text": "STRING",
+                "type_name": "STRING",
+                "position": 3
+              }
+            ]
+          },
+          "total_chunk_count": 1,
+          "chunks": [
+            {
+              "chunk_index": 0,
+              "row_offset": 0,
+              "row_count": 3
+            }
+          ],
+          "total_row_count": 3,
+          "truncated": false
+        },
+        "result": {
+          "chunk_index": 0,
+          "row_offset": 0,
+          "row_count": 3,
+          "data_array": [
+            [
+              "187014751",
+              "residential",
+              "40",
+              "{\"cycleway:both\": \"no\", \"highway\": \"residential\", \"lanes\": \"2\", \"maxspeed\": \"40\", \"maxspeed:type\": \"PL:zone40\", \"name\": \"Aleja Modrzewiowa\", \"surface\": \"asphalt\"}"
+            ],
+            [
+              "557114409",
+              "secondary",
+              null,
+              "{\"cycleway:both\": \"no\", \"highway\": \"secondary\", \"lanes\": \"2\", \"maxspeed:backward\": \"70\", \"maxspeed:forward\": \"50\", \"name\": \"Skotnicka\", \"sidewalk\": \"no\", \"source:maxspeed\": \"sign\", \"surface\": \"asphalt\"}"
+            ],
+            [
+              "1266239200",
+              "trunk_link",
+              null,
+              "{\"cycleway:both\": \"no\", \"destination\": \"Lusina\", \"highway\": \"trunk_link\", \"lanes\": \"2\", \"maxspeed:type\": \"PL:rural\", \"name\": \"Zadziele\", \"oneway\": \"yes\", \"sidewalk:both\": \"no\", \"smoothness\": \"excellent\", \"surface\": \"asphalt\"}"
+            ]
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,54 @@
+{
+  "captured_at": "2026-11-12T15:16:26+00:00",
+  "target": "Databricks SQL Statement Execution API 2.0, workspace host omitted",
+  "httpx": "0.28.1",
+  "steps": [
+    {
+      "request": {
+        "method": "POST",
+        "path": "/api/2.0/sql/statements",
+        "body": {
+          "warehouse_id": "97c455ee6fb1fcb9",
+          "statement": "SELECT no_such_column FROM workspace.map_qa.osm_roads LIMIT 1",
+          "wait_timeout": "10s",
+          "on_wait_timeout": "CONTINUE",
+          "disposition": "INLINE",
+          "format": "JSON_ARRAY"
+        }
+      },
+      "status": 200,
+      "headers": {
+        "date": "Thu, 12 Nov 2026 15:16:34 GMT",
+        "content-type": "application/json"
+      },
+      "removed_header_names": [
+        "access-control-allow-headers",
+        "access-control-allow-origin",
+        "alt-svc",
+        "cache-control",
+        "content-encoding",
+        "expires",
+        "pragma",
+        "server",
+        "server-timing",
+        "strict-transport-security",
+        "transfer-encoding",
+        "vary",
+        "x-content-type-options",
+        "x-databricks-org-id",
+        "x-request-id"
+      ],
+      "body": {
+        "statement_id": "01f1deac-0bec-1beb-ba39-258b3bc049f7",
+        "status": {
+          "state": "FAILED",
+          "error": {
+            "error_code": "BAD_REQUEST",
+            "message": "[UNRESOLVED_COLUMN.WITH_SUGGESTION] A column, variable, or function parameter with name `no_such_column` cannot be resolved. Did you mean one of the following? [`osm_id`, `surface`, `access`, `end_node`, `junction`]. SQLSTATE: 42703; line 1 pos 7"
+          },
+          "sql_state": "42703"
+        }
+      }
+    }
+  ]
+}

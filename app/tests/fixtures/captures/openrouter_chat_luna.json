@@ -1,0 +1,162 @@
+{
+  "captured_at": "2026-11-12T15:34:07+00:00",
+  "target": "OpenRouter /api/v1/chat/completions",
+  "model": "openai/gpt-6-luna",
+  "app_question_version": "b33-v1",
+  "httpx": "0.28.1",
+  "latency_ms": 3187,
+  "request": {
+    "method": "POST",
+    "path": "/api/v1/chat/completions",
+    "body": {
+      "model": "openai/gpt-6-luna",
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Look at the round prohibitory speed-limit sign (Polish sign B-33: a white disc with a red border and a black number) in this street-level photo crop. Which speed limit value in km/h does it show? Answer 'none' if the crop does not show such a sign, for example a speed-limit zone sign, the end of a zone or of a speed limit, another sign, or no sign at all. Answer 'unreadable' if such a sign is present but its number cannot be read.\n\nReply with JSON only, in the form {\"value\": \"<answer>\"}, where <answer> is one of: 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 90, 100, 110, 120, 130, 140, none, unreadable."
+            },
+            {
+              "type": "image_url",
+              "image_url": {
+                "url": "<image sha256=49ac2d5de3a2ddc0bdb15c203e158904534e588251d9cfd3e99abbbbc30bea8f>"
+              }
+            }
+          ]
+        }
+      ],
+      "reasoning": {
+        "effort": "medium"
+      },
+      "response_format": {
+        "type": "json_schema",
+        "json_schema": {
+          "name": "b33_value",
+          "strict": true,
+          "schema": {
+            "type": "object",
+            "properties": {
+              "value": {
+                "type": "string",
+                "enum": [
+                  "5",
+                  "10",
+                  "15",
+                  "20",
+                  "25",
+                  "30",
+                  "35",
+                  "40",
+                  "45",
+                  "50",
+                  "55",
+                  "60",
+                  "65",
+                  "70",
+                  "75",
+                  "80",
+                  "90",
+                  "100",
+                  "110",
+                  "120",
+                  "130",
+                  "140",
+                  "none",
+                  "unreadable"
+                ]
+              }
+            },
+            "required": [
+              "value"
+            ],
+            "additionalProperties": false
+          }
+        }
+      },
+      "max_tokens": 4000
+    }
+  },
+  "status": 200,
+  "headers": {
+    "date": "Thu, 12 Nov 2026 15:34:07 GMT",
+    "content-type": "application/json"
+  },
+  "removed_header_names": [
+    "access-control-allow-origin",
+    "access-control-expose-headers",
+    "alt-svc",
+    "cf-ray",
+    "connection",
+    "content-encoding",
+    "permissions-policy",
+    "referrer-policy",
+    "server",
+    "transfer-encoding",
+    "x-content-type-options",
+    "x-generation-id",
+    "x-openrouter-release"
+  ],
+  "body": {
+    "id": "gen-1794497645-xLRSFHaddyI88JcAu7hE",
+    "object": "chat.completion",
+    "created": 1794497645,
+    "model": "openai/gpt-6-luna",
+    "provider": "Azure",
+    "system_fingerprint": null,
+    "service_tier": "default",
+    "choices": [
+      {
+        "index": 0,
+        "logprobs": null,
+        "finish_reason": "stop",
+        "native_finish_reason": "completed",
+        "message": {
+          "role": "assistant",
+          "content": "{\"value\":\"30\"}",
+          "refusal": null,
+          "reasoning": "**Identifying signs for output**\n\nI need to figure out how to identify signs that are likely to show \"30.\" It seems straightforward—just focus on image number 30. From there, I'll prepare the output in JSON format, which should keep it structured and easy to use. I want to ensure that I'm capturing everything accurately, so I’ll keep the details clear in the output to help whoever needs this data later. Let’s get started on that!",
+          "reasoning_details": [
+            {
+              "type": "reasoning.summary",
+              "summary": "**Identifying signs for output**\n\nI need to figure out how to identify signs that are likely to show \"30.\" It seems straightforward—just focus on image number 30. From there, I'll prepare the output in JSON format, which should keep it structured and easy to use. I want to ensure that I'm capturing everything accurately, so I’ll keep the details clear in the output to help whoever needs this data later. Let’s get started on that!",
+              "format": "azure-openai-responses-v1",
+              "index": 0
+            },
+            {
+              "type": "reasoning.encrypted",
+              "data": "gAAAAABq9dxw3izqk5kaiZWSK7gfYMGtJ3sqlq1kMYp2tzjSA1bPqzBUYLVk_LKbhkO1TMuFkJO-CXyk82JR-TkSc0hjoQ5pj4-RazPaIOPnbVffYgOjaJwalQggs6a_Mc1UQujg6lbZXSUyuh2gisNAtUHG0WHQj9xzcfG7pbluXmU2KWMEaftTA_cvPKfxYfVN2yXhApIk20fvbKqnrz0nQ0-TxxRJVALBAgxvUZIOE08wmFpUZCRPjd8QVj6WjSChCOTpX217wnBuLJReIJALl0gX5PFzwRt_wplIM57LUKjFqh8MTMbQnqA3eyXWnV1NR1cdrzRQdMbx6FiOOjiMW6W7k4CHMbodLGTJXQLQQsQccRpvdzARePDyvNoS2lxdSv0M6k_uNA4xooPwf7-9XPnqPw479_bWa-46rPrlRAwsMdXNnS_VMN9_gqfZhT8bbczeVYUSFrrAOrbwuk-zBbb2Vz1oZPT1BGLOTnC3ln0kibhscIbiQsiLTVMcTnwsLBI0GroRYhV7E8JbpbVgq-QJPBCK2EhEcOeXVzKel0_Ge5cZd_Yhg4Kts3EJZS9yEQJO9hHB4P5CynxujwoUiGUVH2qzE_K2C9SG6sJIbAZPjduk8w404hEWvarSrAyfhzdDo5uR7RpQYurARWvqoJOPsXqdl_MGWjhBTYeQxoeByYc6FKFCR2hT5kIe1XI72tJgP59yj7yMULkSer4SkjpyHplPXgpk1t-zxvizwnB5hhDfbVkE0ELhtdtdx-vCsfrFsPAxZ_j9LElUeOabUcIw2ZiwncMMCZIhWYNg29ViiHj01WIjAfUqTUgKQbU1gHnsHhKHqyPYKZcS-RL12sMn1yfafr8wtSDw-KdBdBuHtrKX99G0uHRQ2nDCR_309XWVzOXSijDnOmXh0dRsdYnGNzL_XQnp620loWhwCHQZ-_1csD3r1KcHGTuU6ecbQVH1VRS2Vpt5q67ww2_p5uVHpPPFU7UogMD_-_mTH_2KoUtfU6gZ1axc6gVtqJK11DhK-bHpDJztks0gaacsTTHfrr02-P3TvuQw_2rZ71keWoJi6m_Y-C1LOVwcuUlx3i6vqVJ4TunrBQJofec2qE_Zl6i28HCPpU9Ud9sNomjzrV6Q7_a5JMXnGizx4DSiztJaadYWyfieshCaZjFX0CTIDDZyhZR3fG4QFHi2h1b8H0687rc4xpgCPAy607WVMHrYjbYJL96l4cYhDNetR_L7_TRUKO4fdDH7pzcx_Yt3djUq13E6jiEVM_itZzS3dwu94-uS4BOgVSzRn7N_GsUoSbqAxDJrBig5oT7uGR2DX4qBmRQEW3zLpayi0WN6J-JwQP547pypkU-fkXU5CF9j3-my8P9ruGLynKZYA1WZfOm4ejbFdww0w5IuNOPP8PlVmsQ6hzXrjMSIXrqKSnyAayRDgtQizJXPnZnBKjfnqVQ3WjDSmzKPFTPQnC3BeSrd5vXmfKtAR0qew2ycXbaxQtM9jhlc-gvTnGoDv9AGt6teWNYQqXT0UGB_ZoBpP6eTlQYFDapPk-lPaC5jqKeNASqkvoLA-KB2Bmq9gsU5i_rHjKaQ_dDcS25QKlpwbSGlP3dh.eyJlbmRwb2ludF9zbHVnIjoib3BlbmFpL2dwdC02LWx1bmEtMjAyNjA5MjJ8YXp1cmUifQ",
+              "format": "azure-openai-responses-v1",
+              "id": "rs_0bf216373e945281016af5dc6f607c8197ac74063dc321f34a",
+              "index": 1
+            }
+          ]
+        }
+      }
+    ],
+    "usage": {
+      "prompt_tokens": 611,
+      "completion_tokens": 37,
+      "total_tokens": 648,
+      "cost": 0,
+      "is_byok": true,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "cache_write_tokens": 0,
+        "audio_tokens": 0,
+        "video_tokens": 0
+      },
+      "cost_details": {
+        "upstream_inference_cost": 7.96e-05,
+        "upstream_inference_prompt_cost": 6.11e-05,
+        "upstream_inference_completions_cost": 1.85e-05
+      },
+      "completion_tokens_details": {
+        "reasoning_tokens": 21,
+        "image_tokens": 0,
+        "audio_tokens": 0
+      }
+    }
+  }
+}
